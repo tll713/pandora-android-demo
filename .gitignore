@@ -1,0 +1,12 @@
+tmp/
+node_modules/
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.pem
+*.key
+__pycache__/
+.DS_Store
+Thumbs.db

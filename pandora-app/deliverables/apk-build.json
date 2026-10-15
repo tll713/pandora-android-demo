@@ -1,0 +1,8 @@
+{
+  "apk": "pandora-demo-0.2.0.apk",
+  "sha256": "1de33504845b69c21ea952640d77137f95063689362172962890f82410c07981",
+  "bytes": 37754,
+  "minimumAndroid": "8.0 (API 26)",
+  "targetSdk": 35,
+  "embeddedAssetsMatchSource": true
+}

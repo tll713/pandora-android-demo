@@ -1,0 +1,7 @@
+node_modules/
+deliverables/*.apk
+deliverables/*.idsig
+deliverables/*.zip
+deliverables/verification/*.png
+android/build/
+*.keystore
