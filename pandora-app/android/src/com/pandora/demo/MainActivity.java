@@ -25,6 +25,9 @@ public final class MainActivity extends Activity {
     private WebView web;
     private static final String ORIGIN = "appassets.androidplatform.net";
     private static final Set<String> FILES = new HashSet<>(Arrays.asList("index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/style.css", "src/mobile.css"));
+    private static final Set<String> API_ORIGINS = new HashSet<>(Arrays.asList("localhost", "127.0.0.1", "10.0.2.2", "172.20.10.3"));
+    // 模拟器通过 10.0.2.2 访问宿主机后端；真机调试时改为电脑局域网 IP
+    private static final String API_BASE = "http://172.20.10.3:8080/api";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -42,23 +45,41 @@ public final class MainActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroidDemo/0.2.0");
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.3.0");
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                return !isLocal(req.getUrl());
+                return false;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                if (isApi(req.getUrl())) return null;
                 if (!isLocal(req.getUrl())) return response(403, "Forbidden", "text/plain", "External requests disabled");
                 String path = req.getUrl().getPath();
                 String file = path.equals("/") ? "index.html" : path.substring(1);
                 if (!FILES.contains(file)) return response(404, "Not Found", "text/plain", "Not found");
                 try {
-                    InputStream body = getAssets().open("web/" + file);
                     String mime = file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html";
                     Map<String, String> headers = new HashMap<>();
-                    headers.put("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'");
+                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:8080 http://127.0.0.1:8080 http://10.0.2.2:8080 http://172.20.10.3:8080; object-src 'none'; base-uri 'self'";
+                    InputStream body;
+                    if (file.equals("index.html")) {
+                        // 在页面脚本执行前注入 API 基地址；nonce 保证 CSP 下仅这段内联脚本可执行
+                        InputStream in = getAssets().open("web/" + file);
+                        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                        byte[] chunk = new byte[4096];
+                        int n;
+                        while ((n = in.read(chunk)) != -1) buffer.write(chunk, 0, n);
+                        in.close();
+                        String html = new String(buffer.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+                        String nonce = java.util.UUID.randomUUID().toString();
+                        html = html.replace("<head>", "<head><script nonce=\"" + nonce + "\">window.__PANDORA_API_BASE__=\"" + API_BASE + "\";</script>");
+                        csp = csp.replace("script-src 'self'", "script-src 'self' 'nonce-" + nonce + "'");
+                        body = new ByteArrayInputStream(html.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    } else {
+                        body = getAssets().open("web/" + file);
+                    }
+                    headers.put("Content-Security-Policy", csp);
                     headers.put("X-Content-Type-Options", "nosniff");
                     return new WebResourceResponse(mime, "UTF-8", 200, "OK", headers, body);
                 } catch (Exception e) { return response(500, "Error", "text/plain", "Local resource unavailable"); }
@@ -67,6 +88,11 @@ public final class MainActivity extends Activity {
         web.loadUrl("https://" + ORIGIN + "/index.html");
     }
     private boolean isLocal(Uri url) { return "https".equals(url.getScheme()) && ORIGIN.equals(url.getHost()); }
+    private boolean isApi(Uri url) {
+        String host = url.getHost();
+        int port = url.getPort();
+        return API_ORIGINS.contains(host) && (port == 8080 || port == -1);
+    }
     private WebResourceResponse response(int status, String reason, String mime, String text) {
         return new WebResourceResponse(mime, "UTF-8", status, reason, new HashMap<>(), new ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }

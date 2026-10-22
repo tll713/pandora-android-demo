@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>潘多拉智能掌上工作系统 · 管理后台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 登录页 -->
+  <div id="login-view" class="login-view hidden">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="login-logo-icon">潘</div>
+        <h1>潘多拉管理后台</h1>
+        <p>智能掌上工作系统 · Web 管理端</p>
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-username">账号</label>
+          <input type="text" id="login-username" placeholder="请输入账号" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label for="login-password">密码</label>
+          <input type="password" id="login-password" placeholder="请输入密码" autocomplete="current-password" required>
+        </div>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn">登 录</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="app-view" class="app-view hidden">
+    <!-- 侧边导航 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo-icon">潘</div>
+        <div>
+          <div class="sidebar-title">潘多拉</div>
+          <div class="sidebar-subtitle">管理后台</div>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <a class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">◈</span>数据概览
+        </a>
+        <a class="nav-item" data-page="users">
+          <span class="nav-icon">◉</span>组织与权限
+        </a>
+        <a class="nav-item" data-page="announcements">
+          <span class="nav-icon">◆</span>公司事项
+        </a>
+        <a class="nav-item" data-page="tasks">
+          <span class="nav-icon">▣</span>任务管理
+        </a>
+        <a class="nav-item" data-page="logs">
+          <span class="nav-icon">▤</span>日志管理
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="current-user" id="current-user"></div>
+        <a class="nav-item nav-logout" id="logout-btn">
+          <span class="nav-icon">⏻</span>退出登录
+        </a>
+      </div>
+    </aside>
+
+    <!-- 内容区 -->
+    <main class="main">
+
+      <!-- 数据概览 -->
+      <section id="page-dashboard" class="page">
+        <div class="page-header">
+          <h2>数据概览</h2>
+          <p class="page-desc">系统核心数据一览</p>
+        </div>
+        <div class="stats-grid" id="stats-grid"></div>
+      </section>
+
+      <!-- 组织与权限 -->
+      <section id="page-users" class="page hidden">
+        <div class="page-header">
+          <h2>组织与权限</h2>
+          <p class="page-desc">管理团队成员与角色权限</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>创建用户</h3>
+          </div>
+          <form id="user-form" class="inline-form">
+            <div class="form-group">
+              <label>姓名</label>
+              <input type="text" id="user-name" placeholder="如：王小明" required>
+            </div>
+            <div class="form-group">
+              <label>账号</label>
+              <input type="text" id="user-login" placeholder="登录账号" required>
+            </div>
+            <div class="form-group">
+              <label>部门</label>
+              <input type="text" id="user-department" placeholder="如：产品部" required>
+            </div>
+            <div class="form-group">
+              <label>角色</label>
+              <select id="user-role" required>
+                <option value="EMPLOYEE">员工</option>
+                <option value="TEAM_LEAD">团队长</option>
+                <option value="DEPT_MANAGER">部门负责人</option>
+              </select>
+            </div>
+            <div class="form-group form-group-action">
+              <button type="submit" class="btn btn-primary">创建用户</button>
+            </div>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>用户列表</h3>
+            <span class="card-meta" id="users-count"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>姓名</th>
+                  <th>账号</th>
+                  <th>部门</th>
+                  <th>角色</th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 公司事项 -->
+      <section id="page-announcements" class="page hidden">
+        <div class="page-header">
+          <h2>公司事项</h2>
+          <p class="page-desc">发布与管理公司公告</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>发布公告</h3>
+          </div>
+          <form id="announcement-form" class="stack-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>标题</label>
+                <input type="text" id="ann-title" placeholder="公告标题" required>
+              </div>
+              <div class="form-group">
+                <label>分类</label>
+                <input type="text" id="ann-category" placeholder="如：通知 / 制度 / 活动" required>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>内容</label>
+              <textarea id="ann-content" rows="4" placeholder="公告正文内容" required></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">发布公告</button>
+            </div>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>公告列表</h3>
+            <span class="card-meta" id="ann-count"></span>
+          </div>
+          <div id="announcements-list" class="ann-list"></div>
+        </div>
+      </section>
+
+      <!-- 任务管理 -->
+      <section id="page-tasks" class="page hidden">
+        <div class="page-header">
+          <h2>任务管理</h2>
+          <p class="page-desc">查看全部任务与变更审核</p>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="task-list">任务列表</button>
+          <button class="tab" data-tab="review-queue">审核队列 <span id="review-badge" class="badge hidden"></span></button>
+        </div>
+
+        <div id="tab-task-list" class="tab-pane">
+          <div class="card">
+            <div class="card-header">
+              <h3>全部任务</h3>
+              <span class="card-meta" id="tasks-count"></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>标题</th>
+                    <th>负责人</th>
+                    <th>状态</th>
+                    <th>优先级</th>
+                    <th>截止时间</th>
+                  </tr>
+                </thead>
+                <tbody id="tasks-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-review-queue" class="tab-pane hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3>待审核申请</h3>
+              <span class="card-meta" id="requests-count"></span>
+            </div>
+            <div id="requests-list" class="request-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 日志管理 -->
+      <section id="page-logs" class="page hidden">
+        <div class="page-header">
+          <h2>日志管理</h2>
+          <p class="page-desc">全员工作日志汇总</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>全部日志</h3>
+            <span class="card-meta" id="logs-count"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>作者</th>
+                  <th>日期</th>
+                  <th>标题</th>
+                  <th>内容摘要</th>
+                </tr>
+              </thead>
+              <tbody id="logs-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- 全局提示 -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+CREATE TABLE IF NOT EXISTS users (
+  id VARCHAR(30) PRIMARY KEY,
+  name VARCHAR(30) NOT NULL,
+  department VARCHAR(40) NOT NULL,
+  role ENUM('ADMIN','FOUNDER','DEPT_MANAGER','TEAM_LEAD','EMPLOYEE') NOT NULL,
+  avatar VARCHAR(10),
+  color VARCHAR(10),
+  password_hash VARCHAR(100) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id VARCHAR(60) PRIMARY KEY,
+  title VARCHAR(80) NOT NULL,
+  detail TEXT,
+  priority ENUM('HIGH','MEDIUM','LOW') NOT NULL,
+  due_at DATETIME NOT NULL,
+  status ENUM('TODO','DOING','DONE') NOT NULL DEFAULT 'TODO',
+  creator_id VARCHAR(30) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME,
+  revision INT NOT NULL DEFAULT 1,
+  deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  FOREIGN KEY (creator_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS task_owners (
+  task_id VARCHAR(60) NOT NULL,
+  user_id VARCHAR(30) NOT NULL,
+  PRIMARY KEY (task_id, user_id),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS task_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  task_id VARCHAR(60) NOT NULL,
+  at DATETIME NOT NULL,
+  actor_id VARCHAR(30) NOT NULL,
+  text VARCHAR(1200) NOT NULL,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS change_requests (
+  id VARCHAR(60) PRIMARY KEY,
+  kind ENUM('CREATE','EDIT','DELETE') NOT NULL,
+  task_id VARCHAR(60) NOT NULL,
+  proposer_id VARCHAR(30) NOT NULL,
+  status ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING',
+  after_json LONGTEXT,
+  before_json LONGTEXT,
+  expected_revision INT,
+  reason VARCHAR(500),
+  reviewer_id VARCHAR(30),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at DATETIME,
+  FOREIGN KEY (proposer_id) REFERENCES users(id),
+  FOREIGN KEY (reviewer_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS work_logs (
+  id VARCHAR(60) PRIMARY KEY,
+  author_id VARCHAR(30) NOT NULL,
+  date DATE NOT NULL,
+  title VARCHAR(80) NOT NULL,
+  content TEXT NOT NULL,
+  task_id VARCHAR(60),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_log_author_date (author_id, date),
+  FOREIGN KEY (author_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS log_versions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  log_id VARCHAR(60) NOT NULL,
+  title VARCHAR(80) NOT NULL,
+  content TEXT NOT NULL,
+  task_id VARCHAR(60),
+  at DATETIME NOT NULL,
+  actor_id VARCHAR(30) NOT NULL,
+  FOREIGN KEY (log_id) REFERENCES work_logs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id VARCHAR(60) PRIMARY KEY,
+  title VARCHAR(120) NOT NULL,
+  content TEXT NOT NULL,
+  category VARCHAR(40) NOT NULL,
+  date DATE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pins (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id VARCHAR(30) NOT NULL,
+  task_id VARCHAR(60) NOT NULL,
+  UNIQUE KEY uk_pin_user_task (user_id, task_id),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (task_id) REFERENCES tasks(id)
+);

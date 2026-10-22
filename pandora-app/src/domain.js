@@ -10,8 +10,8 @@ export const STATUS = { todo: '待开始', doing: '进行中', done: '已完成'
 export const PRIORITY = { high: '高优先级', medium: '中优先级', low: '低优先级' };
 export const STORAGE_KEY = 'pandora.workspace.v2';
 export const userById = id => USERS.find(u => u.id === id);
-export const isManager = u => Boolean(u && u.role !== '员工');
-export const isGlobal = u => ['管理员', '创始人'].includes(u?.role);
+export const isManager = u => Boolean(u && u.role !== '员工' && u.role !== 'EMPLOYEE');
+export const isGlobal = u => ['管理员', '创始人', 'ADMIN', 'FOUNDER'].includes(u?.role);
 export function hydrateUsers(db) {
   for (const u of db.members || []) if (!userById(u.id)) USERS.push(u);
 }
@@ -35,7 +35,9 @@ export function isValidMinute(v) {
 }
 export function canSeeUser(u, ownerId) {
   const owner = userById(ownerId);
-  return Boolean(u && owner && (isGlobal(u) || u.id === ownerId || (isManager(u) && owner.department === u.department)));
+  if (!u || !owner) return false;
+  if (isGlobal(u) || u.id === ownerId) return true;
+  return isManager(u) && owner.department === u.department;
 }
 export const canSeeTask = (u, t) => Boolean(t && !t.deleted && (t.owners.includes(u?.id) || t.creator === u?.id || (isManager(u) && t.owners.some(id => canSeeUser(u, id)))));
 export const canWorkOnTask = (u, t) => Boolean(canSeeTask(u, t) && t.owners.includes(u.id));
@@ -43,7 +45,7 @@ export const canManageTask = (u, t) => Boolean(isManager(u) && canSeeTask(u, t) 
 export const visibleTasks = (db, u) => db.tasks.filter(t => canSeeTask(u, t));
 export const visibleLogs = (db, u) => db.logs.filter(l => canSeeUser(u, l.author));
 export const recentLogs = (db, u, today = dateKey()) => visibleLogs(db, u).filter(l => l.date >= dayOffset(-6, today) && l.date <= today);
-export const allowedAssignees = u => USERS.filter(v => v.role !== '管理员' && canSeeUser(u, v.id));
+export const allowedAssignees = u => USERS.filter(v => v.role !== '管理员' && v.role !== 'ADMIN' && canSeeUser(u, v.id));
 export const isOverdue = (t, now = minuteKey()) => t.dueAt < now && t.status !== 'done';
 const id = prefix => `${prefix}-${globalThis.crypto.randomUUID()}`;
 function requireValue(ok, message) { if (!ok) throw new Error(message); }
