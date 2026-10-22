@@ -10,3 +10,7 @@ node_modules/
 __pycache__/
 .DS_Store
 Thumbs.db
+
+# Java/Maven 编译产物
+server/target/
+*.class
