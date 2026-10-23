@@ -45,9 +45,21 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/", "/index.html", "/favicon.svg", "/src/**", "/assets/**").permitAll()
+                        .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "FOUNDER")
+                        .requestMatchers("/", "/index.html", "/style.css", "/app.js", "/favicon.svg", "/src/**", "/assets/**").permitAll()
                         .anyRequest().authenticated()
                 )
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint((req, res, ex) -> {
+                            res.setStatus(401);
+                            res.setContentType("application/json;charset=UTF-8");
+                            res.getWriter().write("{\"error\":\"登录已过期，请重新登录\"}");
+                        })
+                        .accessDeniedHandler((req, res, ex) -> {
+                            res.setStatus(403);
+                            res.setContentType("application/json;charset=UTF-8");
+                            res.getWriter().write("{\"error\":\"仅管理员和创始人可访问管理后台\"}");
+                        }))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

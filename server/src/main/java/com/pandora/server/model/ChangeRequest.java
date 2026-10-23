@@ -38,7 +38,7 @@ public class ChangeRequest {
     @Column(name = "reviewer_id")
     private String reviewerId;
 
-    @Column(name = "created_at", insertable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "reviewed_at")

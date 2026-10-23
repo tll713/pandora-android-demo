@@ -146,3 +146,7 @@ npm.cmd run build:android
 - 账号密码为演示口令，JWT 密钥写在 `application.properties`，正式部署需改为环境变量并启用强密码策略。
 - 安卓包为演示签名，正式发布需替换为受保护的发布签名。
 - 后端配置默认本机 MySQL（localhost:3306），多环境部署需按环境调整 `application.properties`。
+
+## Web 管理后台升级
+
+管理端已增加工作台、独立审核中心、任务变更表单、成员维护、日志全文及版本查看、公告编辑与置顶。具体权限、数据库升级及验收方式见 [Web 管理端说明](web-admin/README.md)。

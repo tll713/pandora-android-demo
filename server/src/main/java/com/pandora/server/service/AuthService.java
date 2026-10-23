@@ -34,7 +34,7 @@ public class AuthService {
 
     public String authenticate(String username, String rawPassword) {
         User user = userRepository.findById(username).orElse(null);
-        if (user == null || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
+        if (user == null || !user.isEnabled() || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new IllegalArgumentException("用户名或密码错误");
         }
         return generateToken(user);
@@ -62,7 +62,7 @@ public class AuthService {
             var claims = Jwts.parser().verifyWith(secretKey).build()
                     .parseSignedClaims(token).getPayload();
             User user = userRepository.findById(claims.getSubject()).orElse(null);
-            return user != null && credentialStamp(user).equals(claims.get("credentials", String.class))
+            return user != null && user.isEnabled() && credentialStamp(user).equals(claims.get("credentials", String.class))
                     ? user.getId() : null;
         } catch (Exception e) {
             return null;
@@ -72,7 +72,7 @@ public class AuthService {
     private String credentialStamp(User user) {
         try {
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(user.getPasswordHash().getBytes(StandardCharsets.UTF_8));
+                    .digest((user.getPasswordHash() + ":" + user.getAuthVersion()).getBytes(StandardCharsets.UTF_8));
             return java.util.HexFormat.of().formatHex(digest);
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);

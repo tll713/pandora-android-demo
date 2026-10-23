@@ -21,6 +21,12 @@ public class Announcement {
     @Column(nullable = false)
     private LocalDate date;
 
+    @Column(nullable = false)
+    private boolean pinned = false;
+
+    public boolean isPinned() { return pinned; }
+    public void setPinned(boolean pinned) { this.pinned = pinned; }
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getTitle() { return title; }
