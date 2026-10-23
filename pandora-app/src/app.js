@@ -126,10 +126,6 @@ function taskListView() {
   return `<div class="filter-bar task-list-filters"><div class="segmented">${[['all', '全部'], ['focus', '个人重点'], ...Object.entries(STATUS)].map(([id, label]) => `<button class="segment ${state.filter === id ? 'is-active' : ''}" data-filter="${id}">${label}</button>`).join('')}</div><span class="filter-hint">${filtered.length} 项任务</span></div><section class="task-grid">${filtered.map(taskCard).join('') || empty('当前筛选没有任务')}</section>`;
 }
 
-function tasksPage() {
-  return head('任务', '多人共同负责，进展直接记在任务详情里。') + taskListView();
-}
-
 function logsPage() {
   const allLogs = visibleLogs(state.db, user());
   const start = state.logRange === '7' ? dayOffset(-6) : state.logRange === '30' ? dayOffset(-29) : '';
@@ -148,14 +144,24 @@ function calendarPage() {
   const tasks = visibleTasks(state.db, user());
   const canCreate = isManager(user()) ? button('＋ 新建任务', 'new-task', '', 'primary-button') : '';
   const viewSwitch = `<div class="segmented task-view-switch"><button class="segment ${state.taskView === 'calendar' ? 'is-active' : ''}" data-task-view="calendar">日历</button><button class="segment ${state.taskView === 'list' ? 'is-active' : ''}" data-task-view="list">任务列表</button></div>`;
-  const controls = `<div class="view-toolbar">${viewSwitch}${state.taskView === 'calendar' ? `<div class="segmented">${[['month','月'],['week','周'],['day','日']].map(([m,label]) => `<button class="segment ${state.calendarMode === m ? 'is-active' : ''}" data-mode="${m}">${label}</button>`).join('')}</div><div class="calendar-controls">${button('‹','prev')}<strong>${state.calendarDate}</strong>${button('›','next')}${button('今天','today')}</div>` : ''}${canCreate}</div>`;
+  const date = new Date(`${state.calendarDate}T12:00:00`);
+  const monthTitle = `${date.getFullYear()}年${date.getMonth() + 1}月`;
+  const rangeTitle = state.calendarMode === 'month' ? monthTitle : state.calendarMode === 'week' ? `${state.calendarDate} 所在周` : `${state.calendarDate}`;
+  const controls = `<div class="view-toolbar">${viewSwitch}${state.taskView === 'calendar' ? `<div class="calendar-mode-switch segmented">${[['month','月'],['week','周'],['day','日']].map(([m,label]) => `<button class="segment ${state.calendarMode === m ? 'is-active' : ''}" data-mode="${m}">${label}</button>`).join('')}</div><div class="calendar-controls">${button('‹','prev')}<strong>${rangeTitle}</strong>${button('›','next')}${button('今天','today')}</div>` : ''}${canCreate}</div>`;
   if (state.taskView === 'list') return head('任务视图', '按状态管理任务；选择任务可查看详情、记录进展或申请变更。') + controls + taskListView();
   const days = calendarDays(state.calendarDate, state.calendarMode);
-  return head('工作视图', '按截止日期浏览和管理任务。') + controls +
+  if (state.calendarMode === 'day') {
+    const dayTasks = tasks.filter(t => t.dueAt.slice(0, 10) === state.calendarDate).sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+    return head('工作视图', '按截止时间查看当天任务。') + controls +
+      `<section class="calendar-day-timeline" aria-label="${state.calendarDate} 任务时间线"><header class="timeline-header"><div><span class="eyebrow">${state.calendarDate}</span><h2>${Number(state.calendarDate.slice(5, 7))}月${Number(state.calendarDate.slice(8, 10))}日</h2></div><strong>${dayTasks.length} 项任务</strong></header><div class="timeline-list">${dayTasks.map(t => `<button class="timeline-item" data-action="task" data-id="${esc(t.id)}"><time>${t.dueAt.slice(11)}</time><span class="timeline-rail"><i class="calendar-dot calendar-dot--${t.priority}"></i></span><span class="timeline-copy"><b>${esc(t.title)}</b><small>${STATUS[t.status]} · ${PRIORITY[t.priority]}</small></span></button>`).join('') || '<p class="calendar-empty">这一天没有安排任务</p>'}</div></section>`;
+  }
+  return head('工作视图', '按截止日期浏览任务，点击日期查看当天时间线。') + controls +
     `<section class="calendar-panel calendar-panel--${state.calendarMode}">${state.calendarMode === 'month' ? '<div class="calendar-week">'+['一','二','三','四','五','六','日'].map(v=>`<span>${v}</span>`).join('')+'</div>' : ''}<div class="calendar-grid">${days.map(day => {
       const ts = tasks.filter(t => t.dueAt.slice(0, 10) === day).sort((a,b) => a.dueAt.localeCompare(b.dueAt));
-      const visible = state.calendarMode === 'month' ? ts.slice(0, 2) : ts;
-      return `<article class="calendar-day ${day === dateKey() ? 'is-today' : ''} ${day.slice(0, 7) !== state.calendarDate.slice(0, 7) ? 'is-outside' : ''}"><div class="day-head"><button class="day-date" data-day="${day}" aria-label="查看 ${day} 日任务">${state.calendarMode === 'month' ? Number(day.slice(-2)) : day.slice(5)}${day === dateKey() ? '<small>今天</small>' : ''}</button>${ts.length ? `<span class="day-task-total">${ts.length}</span>` : ''}</div><div class="day-items">${visible.map(t => `<button class="day-task day-task--${t.priority}" data-action="task" data-id="${esc(t.id)}" title="${esc(t.title)}"><span>${t.dueAt.slice(11)}</span>${esc(t.title)}</button>`).join('')}${state.calendarMode === 'month' && ts.length > visible.length ? `<button class="day-more" data-day="${day}">还有 ${ts.length - visible.length} 项</button>` : ''}${!ts.length ? '<p class="calendar-empty">—</p>' : ''}</div></article>`;
+      const markers = ts.slice(0, 4).map(t => `<i class="calendar-dot calendar-dot--${t.priority}"></i>`).join('');
+      const extra = ts.length > 4 ? `<span class="calendar-more">+${ts.length - 4}</span>` : '';
+      const count = ts.length ? `<span class="calendar-count">${ts.length > 99 ? '99+' : ts.length} 项</span>` : '<span class="calendar-count calendar-count--empty">无安排</span>';
+      return `<article class="calendar-day ${day === dateKey() ? 'is-today' : ''} ${day.slice(0, 7) !== state.calendarDate.slice(0, 7) ? 'is-outside' : ''}"><button class="day-date" data-day="${day}" aria-label="查看 ${day} 日任务">${Number(day.slice(-2))}${day === dateKey() ? '<small>今天</small>' : ''}</button><button class="day-summary" data-day="${day}" aria-label="查看 ${day} 的 ${ts.length} 项任务"><span class="calendar-marker-row">${markers}${extra}</span>${count}</button></article>`;
     }).join('')}</div></section>`;
 }
 
@@ -210,8 +216,8 @@ function render() {
     root.innerHTML = loginPage();
     return;
   }
-  const nav = [['dashboard','首页','⌂'],['tasks','任务','☷'],['logs','日志','✎'],['calendar','视图','▦'],['mine','我的','◯']];
-  const pages = { dashboard, tasks: tasksPage, logs: logsPage, calendar: calendarPage, mine: minePage };
+  const nav = [['dashboard','首页','⌂'],['logs','日志','✎'],['calendar','视图','▦'],['mine','我的','◯']];
+  const pages = { dashboard, logs: logsPage, calendar: calendarPage, mine: minePage };
   root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><nav class="nav" aria-label="主导航">${nav.map(([route,label,icon]) => `<button class="nav-item ${state.route === route ? 'is-active' : ''}" data-route="${route}"><span class="nav-glyph">${icon}</span><span>${label}</span></button>`).join('')}</nav></aside><main class="main-content"><header class="topbar"><div class="mobile-brand"><span class="brand-mark">P</span><b>潘多拉</b></div><span class="version-label">工作台</span><button class="user-menu" data-route="mine" aria-label="进入我的页面">${person(user())}<span>›</span></button></header><div class="page-wrap">${pages[state.route]()}</div></main></div>`;
 }
 
@@ -282,7 +288,7 @@ async function action(name,id) {
   if (name === 'logout') return logout();
   if (name === 'clear-log-filters') { state.logQuery = ''; render(); return; }
   if (name === 'retry-log-history') return loadLogHistory();
-  if (name === 'route-tasks') { state.route = 'tasks'; render(); window.scrollTo(0,0); return; }
+  if (name === 'route-tasks') { state.route = 'calendar'; state.taskView = 'list'; render(); window.scrollTo(0,0); return; }
   if (name === 'pin') return save(async () => { await api(`/tasks/${id}/pin`, { method: 'POST' }); },'个人重点已更新');
   if (name === 'complete') return open('确认完成任务', `<p class="detail-copy">此操作会将整项任务标记完成，其他负责人也会看到已完成状态，无需审核。</p><div class="detail-actions confirm-actions">${button('确认完成','confirm-complete',id,'primary-button')}${button('返回任务','task',id)}</div>`);
   if (name === 'confirm-complete') return save(async () => { await api(`/tasks/${id}/complete`, { method: 'POST' }); },'任务已完成，无需审核');
