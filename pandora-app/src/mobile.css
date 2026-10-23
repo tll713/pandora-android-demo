@@ -1,4 +1,4 @@
-/* Mobile layout for the offline Android demo. */
+/* Mobile layout for the Android app. */
 .task-open { display:block; width:100%; padding:0; border:0; background:none; text-align:left; color:inherit; }
 .task-meta { display:grid; gap:8px; font-size:12px; color:var(--muted); }
 .task-open h3 { font-size:17px; }.task-open p { font-size:13px; line-height:1.7; }
@@ -16,7 +16,7 @@
 .request-content { padding:16px 24px; font-size:14px; line-height:1.7; }.request-content h4 { color:var(--muted); }
 .confirm-actions { padding-bottom:24px; }.version-item { padding:12px 0; font-size:13px; border-bottom:1px solid var(--line); }.version-item p { line-height:1.7; }
 .detail-owner small { font-size:12px; }.detail-copy { font-size:14px; }.history-item p { font-size:13px; }.history-item small { font-size:11px; }
-.soft-button, .ghost-button, .primary-button { min-height:44px; font-size:13px; }.icon-button { min-width:44px; min-height:44px; }
+.soft-button, .ghost-button, .primary-button, .danger-button { min-height:44px; font-size:13px; }.icon-button { min-width:44px; min-height:44px; }
 .panel > .soft-button { margin:6px 8px 6px 0; }.panel-note { font-size:13px; line-height:1.8; }
 .calendar-panel { overflow:hidden; }.calendar-week, .calendar-grid { min-width:0; }.calendar-grid { grid-template-columns:repeat(7,minmax(0,1fr)); }
 .calendar-week { padding:0; }.calendar-week span { text-align:center; }.calendar-day { padding:10px 4px; min-height:95px; }

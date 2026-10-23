@@ -10,7 +10,9 @@ const root = document.querySelector('#app'), modal = document.querySelector('#mo
 const API = window.__PANDORA_API_BASE__ || 'http://localhost:8080/api';
 
 const state = { token: localStorage.getItem('pandora.token'), user: null, route: 'dashboard', filter: 'all',
-  calendarMode: 'month', calendarDate: dateKey(), logArchive: false, db: null };
+  calendarMode: 'month', calendarDate: dateKey(), logRange: '7', logQuery: '',
+  logHistoryLoaded: false, logLoading: false, logError: '', db: null };
+const APP_VERSION = '0.3.0';
 
 // ============ API 客户端 ============
 async function api(path, options = {}) {
@@ -25,11 +27,37 @@ async function api(path, options = {}) {
 }
 
 async function loadWorkspace() {
+  const token = state.token;
+  const cachedLogs = state.logHistoryLoaded ? state.db?.logs || [] : [];
   const data = await api('/workspace');
+  if (state.token !== token) return;
   state.user = data.user;
   state.db = data.db;
+  if (state.logHistoryLoaded) {
+    const logs = new Map(cachedLogs.map(log => [log.id, log]));
+    for (const log of state.db.logs || []) logs.set(log.id, log);
+    state.db.logs = [...logs.values()];
+  }
   USERS.length = 0;
   USERS.push(...(state.db.members || []));
+}
+
+async function loadLogHistory() {
+  if (state.logHistoryLoaded || state.logLoading) return;
+  const token = state.token;
+  state.logLoading = true; state.logError = ''; render();
+  try {
+    const history = await api(`/logs/history?before=${dayOffset(-6)}`);
+    if (state.token !== token || !state.db) return;
+    const logs = new Map((state.db.logs || []).map(log => [log.id, log]));
+    for (const log of history) logs.set(log.id, log);
+    state.db.logs = [...logs.values()];
+    state.logHistoryLoaded = true;
+  } catch (e) {
+    if (state.token === token) { state.logError = '历史日志加载失败，请重试'; notify(e.message, true); }
+  } finally {
+    if (state.token === token) { state.logLoading = false; render(); }
+  }
 }
 
 async function save(action, message) {
@@ -40,6 +68,7 @@ async function save(action, message) {
 function logout() {
   localStorage.removeItem('pandora.token');
   state.token = null; state.user = null; state.db = null; state.route = 'dashboard';
+  state.logHistoryLoaded = false; state.logLoading = false; state.logError = ''; state.logRange = '7'; state.logQuery = '';
   close(); render();
 }
 
@@ -47,6 +76,7 @@ const user = () => state.user || USERS.find(u => u.id === 'lin') || USERS[0];
 const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const names = owners => owners.map(id => userById(id)?.name || id).join('、');
 const stamp = value => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+const shortDate = value => `${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日`;
 const dueText = value => `${value.slice(5, 10).replace('-', '月')}日 ${value.slice(11)}`;
 const statusPill = s => `<span class="status status--${s}"><i></i>${STATUS[s]}</span>`;
 const priorityPill = p => `<span class="priority priority--${p}">${PRIORITY[p]}</span>`;
@@ -72,13 +102,13 @@ function taskCard(t) {
 function logCard(l) { return `<article class="log-card"><div class="log-card-top"><b>${esc(userById(l.author)?.name)}</b><span>${l.date}${l.date === dateKey() ? ' · 今天' : ''}</span></div><h3>${button(esc(l.title), 'log', l.id, 'log-title-button')}</h3><p class="log-content">${esc(l.content)}</p>${l.versions?.length ? `<small>保留 ${l.versions.length} 次修改记录</small>` : ''}</article>`; }
 
 function loginPage() {
-  return `<div class="login-page"><div class="login-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><p class="login-sub">智能掌上工作系统</p><form data-form="login"><label>账号<input name="username" required autocomplete="username"></label><label>密码<input type="password" name="password" required autocomplete="current-password"></label><button class="primary-button login-button" type="submit">登 录</button></form><p class="login-hint">演示账号：admin / lin / manager / founder，密码与账号相同</p></div></div>`;
+  return `<div class="login-page"><div class="login-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><h1>欢迎回来</h1><p class="login-sub">登录你的工作账号</p><form data-form="login"><label>账号<input name="username" required autocomplete="username" placeholder="请输入账号"></label><label>密码<input type="password" name="password" required autocomplete="current-password" placeholder="请输入密码"></label><button class="primary-button login-button" type="submit">登录</button></form></div></div>`;
 }
 
 function dashboard() {
   const tasks = visibleTasks(state.db, user()), pinned = (state.db.pins?.[user().id] || []).map(id => tasks.find(t => t.id === id)).filter(Boolean);
   const daily = state.db.logs.find(l => l.author === user().id && l.date === dateKey());
-  return head(`你好，${esc(user().name)}`, '先处理重要的事，再把今天的工作记下来。', button(daily ? '编辑今日日志' : '＋ 写今日日志', 'new-log', '', 'primary-button')) +
+  return head(`你好，${esc(user().name)}`, '先处理重要的事，再把今天的工作记下来。', button(daily ? '编辑今日日志' : '＋ 写今日日志', daily ? 'edit-log' : 'new-log', daily?.id || '', 'primary-button')) +
     `<section class="metric-grid"><div class="metric-card metric-card--green"><span class="metric-label">我的未完成</span><strong>${tasks.filter(t => t.owners.includes(user().id) && t.status !== 'done').length}</strong></div><div class="metric-card"><span class="metric-label">今日截止</span><strong>${tasks.filter(t => t.dueAt.slice(0, 10) === dateKey() && t.status !== 'done').length}</strong></div></section>` +
     panel('个人重要任务', pinned.length ? pinned.map(taskCard).join('') : empty('在任务详情中关注重点工作'), button('全部任务 →', 'route-tasks', '', 'text-button')) +
     panel('公司派发任务', tasks.slice(0, 10).map(taskCard).join('') || empty('当前没有可见任务')) +
@@ -92,9 +122,17 @@ function tasksPage() {
 }
 
 function logsPage() {
-  const logs = (state.logArchive ? visibleLogs(state.db, user()) : recentLogs(state.db, user())).sort((a, b) => b.date.localeCompare(a.date));
-  return head('工作日志', '每天一篇综合记录；仅本人当天日志可编辑，修改前内容留档。', button('写／编辑今日日志', 'new-log', '', 'primary-button')) +
-    `<div class="filter-bar"><div class="segmented"><button class="segment ${!state.logArchive ? 'is-active' : ''}" data-log-range="recent">近七天</button><button class="segment ${state.logArchive ? 'is-active' : ''}" data-log-range="archive">历史记录</button></div><span class="filter-hint">${logs.length} 篇 · ${state.logArchive ? '历史日志只读保留' : '今天及前六天'}</span></div>${logs.map(logCard).join('') || empty('当前范围没有日志')}`;
+  const allLogs = visibleLogs(state.db, user());
+  const start = state.logRange === '7' ? dayOffset(-6) : state.logRange === '30' ? dayOffset(-29) : '';
+  const query = state.logQuery.trim().toLowerCase();
+  const logs = allLogs.filter(l => (!start || l.date >= start) && l.date <= dateKey())
+    .filter(l => !query || `${l.title} ${l.content}`.toLowerCase().includes(query))
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  const rangeLabel = { '7': '近7天', '30': '近30天', all: '全部日志' }[state.logRange];
+  const status = state.logRange !== '7' && state.logLoading ? '正在加载历史日志…'
+    : state.logRange !== '7' && state.logError ? state.logError : `${rangeLabel} · 共 ${logs.length} 篇`;
+  return head('我的日志', '记录每天的工作与思考，忙碌时可补写最近三天。', button('写日志', 'new-log', '', 'primary-button')) +
+    `<section class="log-filter" aria-busy="${state.logLoading}"><div class="segmented log-range" role="group" aria-label="日志时间范围">${[['7','近7天'],['30','近30天'],['all','全部']].map(([id,label]) => `<button class="segment ${state.logRange === id ? 'is-active' : ''}" aria-pressed="${state.logRange === id}" data-log-range="${id}">${label}</button>`).join('')}</div><form class="log-search" data-form="log-filter"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" name="query" value="${esc(state.logQuery)}" placeholder="搜索我的日志" aria-label="搜索我的日志"></label><button class="soft-button" type="submit">搜索</button></form><div class="log-filter-summary"><span role="status">${status}</span>${state.logError && state.logRange !== '7' ? button('重新加载', 'retry-log-history', '', 'text-button') : query ? button('清除搜索', 'clear-log-filters', '', 'text-button') : ''}</div></section><section class="log-results" aria-label="日志列表">${logs.map(logCard).join('') || empty(state.logLoading ? '正在加载日志' : state.logError && state.logRange !== '7' ? '暂时无法获取完整日志，请重新加载' : '这个范围内没有符合条件的日志')}</section>`;
 }
 
 function calendarPage() {
@@ -112,10 +150,39 @@ function requestCard(r) {
   return `<article class="log-card"><div class="log-card-top"><b>${kindLabel(r.kind)}申请</b><span>${({pending:'待审核',approved:'已通过',rejected:'已驳回'})[r.status]}</span></div><h3>${esc(r.after?.title || r.before?.title)}</h3><p>申请人 · ${esc(userById(r.proposer)?.name)}<br>${stamp(r.createdAt)}</p>${r.reason ? `<p>审核备注：${esc(r.reason)}</p>` : ''}${button('查看申请', 'request', r.id, 'soft-button')}</article>`;
 }
 
+function settingsRow(icon, title, detail, action) {
+  return `<button data-action="${action}"><span class="settings-icon" aria-hidden="true">${icon}</span><span><b>${title}</b><small>${detail}</small></span><i aria-hidden="true">›</i></button>`;
+}
+
 function minePage() {
-  return head('我的', '潘多拉智能掌上工作系统') +
-    panel('当前身份', `${person(user())}<p class="panel-note">${esc(user().department || '')}</p>${button('退出登录','logout','','primary-button')}`) +
-    panel('使用说明', `<p class="panel-note">本系统连接公司服务器，数据实时同步。任务创建、编辑、删除需提交审核；任务完成和进展记录直接生效。每日日志仅当天可编辑，历史版本长期保留。</p>`);
+  const today = dateKey(), month = today.slice(0, 7);
+  const myTasks = visibleTasks(state.db, user()).filter(t => t.owners.includes(user().id));
+  const myLogs = visibleLogs(state.db, user());
+  const done = myTasks.filter(t => t.status === 'done' && t.completedAt?.slice(0, 7) === month).length;
+  const monthLogs = myLogs.filter(l => l.date.slice(0, 7) === month && l.date <= today).length;
+  const days = [0, -1, -2].map(offset => dayOffset(offset));
+  const written = days.filter(date => myLogs.some(l => l.date === date)).length;
+  return `<div class="mine-page"><section class="profile-hero"><div class="profile-identity"><div class="profile-avatar avatar avatar--${esc(user().color || 'blue')}">${esc(user().avatar || user().name?.slice(-1) || '?')}</div><div><span class="profile-eyebrow">我的工作空间</span><h1>${esc(user().name)}</h1><p>${esc(user().department || '未设置部门')} · ${esc(user().roleName || user().role)}</p><span>账号 ${esc(user().id)}</span></div></div><div class="profile-bottom"><span>把每天的积累，留在这里</span>${button('个人资料 ›', 'profile-details', '', 'profile-detail-button')}</div></section>` +
+    panel('工作概览', `<dl class="profile-stats"><div><dt>未完成任务</dt><dd>${myTasks.filter(t => t.status !== 'done').length}</dd></div><div><dt>本月已完成</dt><dd>${done}</dd></div><div><dt>本月日志</dt><dd>${monthLogs}</dd></div></dl><p class="overview-note">${Number(today.slice(5, 7))}月的工作积累，从每一项完成开始</p>`, `<span class="month-label">${Number(today.slice(5, 7))}月</span>`) +
+    panel('最近三天日志', `<p class="journal-intro">已记录 <b>${written}</b> / 3 天${written === 3 ? '，最近的工作都已记下' : '，忙碌过后也记得补上'}</p><div class="journal-days">${days.map((date, i) => {
+      const log = myLogs.find(l => l.date === date);
+      return `<button class="journal-day ${log ? 'is-written' : ''}" data-action="${log ? 'edit-log' : 'new-log-date'}" data-id="${esc(log?.id || date)}" aria-label="${['今天','昨天','前天'][i]} ${date} ${log ? '已填写，编辑日志' : '待填写，写日志'}"><span class="journal-label">${['今天','昨天','前天'][i]}</span><strong>${shortDate(date)}</strong><span class="journal-status">${log ? '✓ 已填写' : '＋ 待填写'}</span><small>${log ? '编辑记录' : i ? '补写日志' : '记录今天'}</small></button>`;
+    }).join('')}</div>`, '<span class="section-caption">点击填写或编辑</span>') +
+    panel('账号与安全', `<div class="settings-list">${settingsRow('◎', '个人资料', '查看账号、部门与岗位信息', 'profile-details')}${settingsRow('◇', '修改密码', '定期更新密码，保护工作账号', 'password-form')}</div>`) +
+    panel('帮助与关于', `<div class="settings-list">${settingsRow('?', '使用帮助', '日志补写规则与常见问题', 'help')}${settingsRow('P', '关于潘多拉', `当前版本 ${APP_VERSION}`, 'about')}</div>`) +
+    button('退出登录', 'confirm-logout', '', 'danger-button mine-logout') + '<p class="mine-footer">潘多拉 · 让工作有记录</p></div>';
+}
+
+function profileDetails() {
+  open('个人资料', `<div class="profile-dialog"><div class="account-details">${[['姓名',user().name],['账号',user().id],['部门',user().department || '未设置'],['角色',user().roleName || user().role]].map(([label,value]) => `<div><span>${label}</span><b>${esc(value)}</b></div>`).join('')}</div><p class="help-note">如需变更姓名、部门或角色，请联系公司管理员。</p></div>`);
+}
+
+function passwordForm() {
+  open('修改密码', `<form class="modal-form" data-form="password"><p class="form-tip">修改成功后需重新登录，其他设备的登录也将失效。</p><label>原密码<input type="password" name="currentPassword" required autocomplete="current-password" placeholder="请输入原密码"></label><label>新密码<input type="password" name="newPassword" minlength="8" maxlength="64" required autocomplete="new-password" placeholder="请输入8～64位新密码"></label><label>确认新密码<input type="password" name="confirmPassword" minlength="8" maxlength="64" required autocomplete="new-password" placeholder="再次输入新密码"></label><p class="form-error" role="alert"></p><div class="modal-actions"><button class="primary-button" type="submit">确认修改</button></div></form>`);
+}
+
+function helpDialog() {
+  open('使用帮助', `<div class="help-content"><section><h3>哪几天的日志可以补写？</h3><p>支持今天、昨天和前天，每人每天一篇。点击“写日志”或“我的”页面中的日期即可填写；已填写的日期可以继续编辑。</p></section><section><h3>更早的日志还能查看吗？</h3><p>可以。在日志页切换“近7天”“近30天”或“全部”，也可以搜索标题和正文。超过三天的日志只读，修改前的版本会保留。</p></section><section><h3>为什么只能看到自己的日志？</h3><p>手机端用于个人工作记录，登录后只展示本人的日志。团队日志由具备权限的管理人员在 Web 管理端查看。</p></section><section><h3>任务进展和完成如何处理？</h3><p>在任务详情里记录进展或标记完成。任务的创建、编辑和删除需审核，记录进展与完成任务直接生效。</p></section><section><h3>账号资料有误或忘记密码怎么办？</h3><p>请联系公司管理员核对账号信息。记得原密码时，可在“账号与安全”中修改密码。</p></section></div>`);
 }
 
 // ============ 路由渲染 ============
@@ -126,7 +193,7 @@ function render() {
   }
   const nav = [['dashboard','首页','⌂'],['tasks','任务','☷'],['logs','日志','✎'],['calendar','视图','▦'],['mine','我的','◯']];
   const pages = { dashboard, tasks: tasksPage, logs: logsPage, calendar: calendarPage, mine: minePage };
-  root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><nav class="nav" aria-label="主导航">${nav.map(([route,label,icon]) => `<button class="nav-item ${state.route === route ? 'is-active' : ''}" data-route="${route}"><span class="nav-glyph">${icon}</span><span>${label}</span></button>`).join('')}</nav></aside><main class="main-content"><header class="topbar"><div class="mobile-brand"><span class="brand-mark">P</span><b>潘多拉</b></div><span class="version-label">在线版</span><button class="user-menu" data-action="logout">${person(user())}<span>⌄</span></button></header><div class="page-wrap">${pages[state.route]()}</div></main></div>`;
+  root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><nav class="nav" aria-label="主导航">${nav.map(([route,label,icon]) => `<button class="nav-item ${state.route === route ? 'is-active' : ''}" data-route="${route}"><span class="nav-glyph">${icon}</span><span>${label}</span></button>`).join('')}</nav></aside><main class="main-content"><header class="topbar"><div class="mobile-brand"><span class="brand-mark">P</span><b>潘多拉</b></div><span class="version-label">工作台</span><button class="user-menu" data-route="mine" aria-label="进入我的页面">${person(user())}<span>›</span></button></header><div class="page-wrap">${pages[state.route]()}</div></main></div>`;
 }
 
 // ============ 详情弹窗 ============
@@ -146,16 +213,26 @@ function taskForm(id = '') {
   open(t ? '申请编辑任务' : '创建任务申请', `<form class="modal-form" data-form="task" data-id="${esc(id)}"><label>任务名称<input name="title" value="${esc(t?.title || '')}" maxlength="80" required></label><fieldset class="assignee-field"><legend>负责人（可多选）</legend>${(state.db.allowedAssignees || []).map(u => `<label class="check-option"><input type="checkbox" name="owners" value="${esc(u.id)}" ${t?.owners.includes(u.id) ? 'checked' : ''}>${esc(u.name)} · ${esc(u.roleName || u.role)}</label>`).join('')}</fieldset><label>截止时间<input type="datetime-local" name="dueAt" value="${t?.dueAt || `${dayOffset(1)}T18:30`}" step="60" required></label><label>优先级<select name="priority">${Object.entries(PRIORITY).map(([id,label]) => `<option value="${id}" ${t?.priority === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label>任务说明<textarea name="detail" maxlength="2000" rows="4">${esc(t?.detail || '')}</textarea></label><p class="panel-note">提交后由另一位管理员或创始人审核，通过后生效。</p><div class="modal-actions"><button class="primary-button" type="submit">提交审核</button></div></form>`);
 }
 
-function logForm(id = '') {
-  const l = id ? state.db.logs.find(v => v.id === id) : state.db.logs.find(v => v.author === user().id && v.date === dateKey());
-  if (l && !canEditLog(user(), l)) return notify('只能编辑本人当天日志', true);
-  open(l ? '编辑今日日志' : '写今日日志', `<form class="modal-form" data-form="log" data-id="${esc(l?.id || '')}"><p class="panel-note">${dateKey()} · 每天一篇，不必逐项填写任务日志</p><label>今天的工作<textarea name="content" maxlength="3000" rows="8" placeholder="完成了什么？遇到什么问题？下一步准备做什么？" required>${esc(l?.content || '')}</textarea></label><details><summary>可选：标题与关联任务</summary><label>标题<input name="title" value="${esc(l?.title || '')}" maxlength="80" placeholder="不填则自动使用日期"></label><label>关联任务<select name="taskId"><option value="">不关联任务</option>${visibleTasks(state.db,user()).map(t => `<option value="${esc(t.id)}" ${l?.taskId === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('')}</select></label></details><div class="modal-actions"><button class="primary-button" type="submit">保存日志</button></div></form>`);
+function chooseLogDate() {
+  const dates = [0, -1, -2].map(offset => dayOffset(offset)), labels = ['今天', '昨天', '前天'];
+  open('选择日志日期', `<div class="date-choice-list">${dates.map((date, i) => {
+    const log = state.db.logs.find(v => v.author === user().id && v.date === date);
+    return `<button data-action="${log ? 'edit-log' : 'new-log-date'}" data-id="${esc(log?.id || date)}"><span><b>${labels[i]}</b><small>${shortDate(date)}</small></span><em>${log ? '已填写 · 编辑' : '待填写'}</em><i>›</i></button>`;
+  }).join('')}</div><p class="date-choice-tip">仅支持今天、昨天和前天，每天一篇</p>`);
+}
+
+function logForm(id = '', selectedDate = '') {
+  const l = id ? state.db.logs.find(v => v.id === id) : null;
+  if (l && !canEditLog(user(), l)) return notify('只能编辑本人最近三天的日志', true);
+  const logDate = l?.date || selectedDate || dateKey();
+  const dateField = `<label>日志日期<input type="date" name="date" value="${logDate}" readonly></label>`;
+  open(l ? `编辑${shortDate(l.date)}日志` : '写工作日志', `<form class="modal-form" data-form="log" data-id="${esc(l?.id || '')}">${dateField}<p class="form-tip">每人每天一篇，可补写或编辑最近三天</p><label>工作内容<textarea name="content" maxlength="3000" rows="8" placeholder="完成了什么？遇到什么问题？下一步准备做什么？" required>${esc(l?.content || '')}</textarea></label><details><summary>标题与关联任务（可选）</summary><label>标题<input name="title" value="${esc(l?.title || '')}" maxlength="80" placeholder="不填则自动使用日志日期"></label><label>关联任务<select name="taskId"><option value="">不关联任务</option>${visibleTasks(state.db,user()).map(t => `<option value="${esc(t.id)}" ${l?.taskId === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('')}</select></label></details><div class="modal-actions"><button class="primary-button" type="submit">保存日志</button></div></form>`);
 }
 
 function logDetail(id) {
   const l = visibleLogs(state.db,user()).find(v => v.id === id);
   if (!l) return notify('无权查看日志',true);
-  open(l.title, `<p class="detail-copy">${esc(userById(l.author)?.name)} · ${l.date}</p><p class="detail-copy log-content">${esc(l.content)}</p><div class="detail-actions">${canEditLog(user(),l) ? button('编辑今日日志','edit-log',id,'primary-button') : '<span class="done-message">历史或他人日志只读</span>'}</div><div class="detail-history"><h3>修改记录（${l.versions?.length || 0}）</h3>${[...(l.versions || [])].reverse().map((v,i) => `<details class="version-item"><summary>历史版本 ${(l.versions?.length || 0)-i} · ${stamp(v.at)}</summary><b>${esc(v.title)}</b><p class="log-content">${esc(v.content)}</p></details>`).join('') || '<p class="panel-note">尚无修改记录</p>'}</div>`);
+  open(l.title, `<p class="detail-copy">${esc(userById(l.author)?.name)} · ${l.date}</p><p class="detail-copy log-content">${esc(l.content)}</p><div class="detail-actions">${canEditLog(user(),l) ? button('编辑这篇日志','edit-log',id,'primary-button') : '<span class="done-message">超过三天或他人日志只读</span>'}</div><div class="detail-history"><h3>修改记录（${l.versions?.length || 0}）</h3>${[...(l.versions || [])].reverse().map((v,i) => `<details class="version-item"><summary>历史版本 ${(l.versions?.length || 0)-i} · ${stamp(v.at)}</summary><b>${esc(v.title)}</b><p class="log-content">${esc(v.content)}</p></details>`).join('') || '<p class="panel-note">尚无修改记录</p>'}</div>`);
 }
 
 function requestDetail(id) {
@@ -169,10 +246,20 @@ function requestDetail(id) {
 async function action(name,id) {
   if (name === 'task') return taskDetail(id);
   if (name === 'new-task' || name === 'edit-task') return taskForm(id);
-  if (name === 'new-log' || name === 'edit-log') return logForm(id);
+  if (name === 'new-log') return chooseLogDate();
+  if (name === 'new-log-date') return logForm('', id);
+  if (name === 'edit-log') return logForm(id);
   if (name === 'log') return logDetail(id);
   if (name === 'request') return requestDetail(id);
+  if (name === 'profile-details') return profileDetails();
+  if (name === 'password-form') return passwordForm();
+  if (name === 'help') return helpDialog();
+  if (name === 'about') return open('关于潘多拉', `<div class="about-content"><span class="brand-mark">P</span><h3>潘多拉</h3><p>智能掌上工作系统</p><span class="about-version">版本 ${APP_VERSION}</span><p class="help-note">让任务有进展，让工作有记录。</p></div>`);
+  if (name === 'confirm-logout') return open('退出登录', `<p class="detail-copy">确认退出当前账号？再次使用时需要登录。</p><div class="detail-actions confirm-actions">${button('取消','cancel-dialog')}${button('确认退出','logout','','primary-button')}</div>`);
+  if (name === 'cancel-dialog') return close();
   if (name === 'logout') return logout();
+  if (name === 'clear-log-filters') { state.logQuery = ''; render(); return; }
+  if (name === 'retry-log-history') return loadLogHistory();
   if (name === 'route-tasks') { state.route = 'tasks'; render(); window.scrollTo(0,0); return; }
   if (name === 'pin') return save(async () => { await api(`/tasks/${id}/pin`, { method: 'POST' }); },'个人重点已更新');
   if (name === 'complete') return open('确认完成任务', `<p class="detail-copy">此操作会将整项任务标记完成，其他负责人也会看到已完成状态，无需审核。</p><div class="detail-actions confirm-actions">${button('确认完成','confirm-complete',id,'primary-button')}${button('返回任务','task',id)}</div>`);
@@ -185,19 +272,25 @@ async function action(name,id) {
 }
 
 // ============ 事件绑定 ============
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   const el = e.target.closest('button'); if (!el) return;
   if (el.hasAttribute('data-close')) return close();
   if (el.dataset.route) { state.route=el.dataset.route; render(); window.scrollTo(0,0); return; }
   if (el.dataset.filter) { state.filter=el.dataset.filter; render(); return; }
   if (el.dataset.mode) { state.calendarMode=el.dataset.mode; render(); return; }
   if (el.dataset.day) { state.calendarDate=el.dataset.day; state.calendarMode='day'; render(); return; }
-  if (el.dataset.logRange) { state.logArchive=el.dataset.logRange === 'archive'; render(); return; }
+  if (el.dataset.logRange) {
+    state.logRange = el.dataset.logRange;
+    render();
+    if (state.logRange !== '7') await loadLogHistory();
+    return;
+  }
   if (el.dataset.action) action(el.dataset.action,el.dataset.id);
 });
 
 document.addEventListener('submit', async e => {
   e.preventDefault(); const form=e.target, fd=new FormData(form), v=Object.fromEntries(fd.entries()), id=form.dataset.id;
+  if (form.dataset.form === 'log-filter') { state.logQuery = v.query || ''; render(); return; }
   if (form.dataset.form === 'login') {
     try {
       const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: v.username, password: v.password }) });
@@ -207,14 +300,30 @@ document.addEventListener('submit', async e => {
     return;
   }
   if (!state.token) return notify('请先登录', true);
+  if (form.dataset.form === 'password') {
+    const error = form.querySelector('.form-error'), submit = form.querySelector('[type="submit"]');
+    error.textContent = '';
+    if (v.newPassword !== v.confirmPassword) { error.textContent = '两次输入的新密码不一致'; return; }
+    submit.disabled = true; submit.textContent = '正在修改…';
+    try {
+      await api('/auth/password', { method: 'POST', body: JSON.stringify({ currentPassword: v.currentPassword, newPassword: v.newPassword }) });
+      logout(); notify('密码已修改，请使用新密码登录');
+    } catch (err) {
+      if (form.isConnected) error.textContent = err.message;
+      else notify(err.message, true);
+    } finally {
+      submit.disabled = false; submit.textContent = '确认修改';
+    }
+    return;
+  }
   if (form.dataset.form === 'task') { v.owners=fd.getAll('owners'); await save(async () => { await api('/tasks/requests', { method: 'POST', body: JSON.stringify({ kind: id ? 'edit' : 'create', taskId: id || undefined, values: v }) }); },'任务变更已提交审核'); }
   if (form.dataset.form === 'note') await save(async () => { await api(`/tasks/${id}/progress`, { method: 'POST', body: JSON.stringify({ text: v.note }) }); },'工作进展已保存');
-  if (form.dataset.form === 'log') await save(async () => { await api('/logs', { method: 'POST', body: JSON.stringify({ logId: id || undefined, values: v }) }); },'今日日志已保存，历史版本已保留');
+  if (form.dataset.form === 'log') await save(async () => { await api('/logs', { method: 'POST', body: JSON.stringify({ logId: id || undefined, values: v }) }); },`${shortDate(v.date)}日志已保存`);
   if (form.dataset.form === 'review') await save(async () => { await api(`/tasks/requests/${id}/review`, { method: 'POST', body: JSON.stringify({ approve: e.submitter.value === 'approve', reason: v.reason }) }); },'审核结果已保存');
 });
 
 window.pandoraBack = () => { if (modal.open) { close(); return true; } if (state.route !== 'dashboard') { state.route='dashboard'; render(); return true; } return false; };
-document.addEventListener('visibilitychange', () => { if (!document.hidden && state.token) loadWorkspace().then(render); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.token) loadWorkspace().then(render).catch(e => notify(e.message, true)); });
 
 // 启动：有 token 则自动加载工作区
 if (state.token) loadWorkspace().then(render).catch(() => render());

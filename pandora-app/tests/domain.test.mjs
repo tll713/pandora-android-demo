@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { USERS, userById, seedDatabase, validateDatabase, createTask, requestTaskChange, reviewTaskChange,
-  canSeeTask, visibleTasks, updateTaskDetail, completeTask, saveLog, canEditLog, recentLogs,
+  canSeeTask, visibleTasks, visibleLogs, updateTaskDetail, completeTask, saveLog, canEditLog, recentLogs,
   calendarDays, shiftCalendar, togglePin, createDemoAccount, isOverdue, isValidMinute } from '../src/domain.js';
 const manager=userById('manager'), lin=userById('lin'), zhou=userById('zhou'), founder=userById('founder'), admin=userById('admin');
 const now=new Date('2026-10-14T10:30:00'), db=()=>seedDatabase(now);
@@ -75,21 +75,38 @@ test('daily log is one per author per day, task linking optional, old content re
   assert.equal(first.content,'下午补充'); assert.equal(first.versions.at(-1).content,'上午内容');
   assert.equal(first.versions.length,2); assert.equal(data.logs.length,count);
 });
-test('log can only be edited today by its author, cannot be moved to today or backdated',()=>{
+test('logs can be written and edited for the latest three days without moving their date',()=>{
   const data=db(), l=data.logs[0], past=data.logs.find(l=>l.author==='lin' && l.date!=='2026-10-14');
+  assert.throws(()=>saveLog(data,manager,{content:'改写',date:l.date},l.id,now),/本人最近三天/);
+  assert.throws(()=>saveLog(data,lin,{content:'移到今天',date:'2026-10-14'},past.id,now),/修改日志日期/);
+  const yesterday=data.logs.find(v=>v.author==='zhou' && v.date==='2026-10-13');
+  const backfilled=saveLog(data,lin,{content:'补写昨天',date:'2026-10-13'},null,now);
+  assert.equal(backfilled.date,'2026-10-13');
+  saveLog(data,zhou,{content:'修改昨天',date:'2026-10-13'},yesterday.id,now);
+  assert.equal(yesterday.content,'修改昨天');
+  assert.throws(()=>saveLog(data,lin,{content:'补写过期',date:'2026-10-11'},null,now),/最近三天/);
+  assert.throws(()=>saveLog(data,lin,{content:'未来日志',date:'2026-10-15'},null,now),/最近三天/);
   const before=structuredClone(data);
-  assert.throws(()=>saveLog(data,manager,{content:'改写'},l.id,now),/本人当天/);
-  assert.throws(()=>saveLog(data,lin,{content:'移到今天',date:'2026-10-14'},past.id,now),/本人当天/);
-  assert.throws(()=>saveLog(data,lin,{content:'补写',date:'2026-10-13'},null,now),/当天/);
   assert.throws(()=>saveLog(data,lin,{content:'越权关联',taskId:'t7'},l.id,now),/无权查看/);
   assert.deepEqual(data,before);
-  assert.equal(canEditLog(lin,l,new Date('2026-10-15T00:01:00')),false);
+  assert.equal(canEditLog(lin,l,new Date('2026-10-16T00:01:00')),true);
+  assert.equal(canEditLog(lin,l,new Date('2026-10-17T00:01:00')),false);
 });
 test('seven-day view excludes day eight and future, keeps archive data',()=>{
   const data=db(); data.logs.push({...data.logs[0],id:'future',date:'2026-10-15'});
   const logs=recentLogs(data,lin,'2026-10-14');
   assert.ok(logs.every(l=>l.date>='2026-10-08' && l.date<='2026-10-14' && l.author==='lin'));
   assert.ok(data.logs.some(l=>l.date==='2026-10-06'));
+});
+test('mobile logs belong only to the signed-in user, including managers and global roles',()=>{
+  const data=db();
+  for (const u of [lin,zhou,manager,founder,admin]) {
+    data.logs.push({...data.logs[0],id:`personal-${u.id}`,author:u.id});
+    const logs=visibleLogs(data,u);
+    assert.ok(logs.some(l=>l.id===`personal-${u.id}`));
+    assert.ok(logs.every(l=>l.author===u.id));
+  }
+  assert.deepEqual(visibleLogs(data,null),[]);
 });
 test('calendar handles leap month, Monday alignment, month-end and year transitions',()=>{
   const month=calendarDays('2024-02-20'); assert.equal(month[0],'2024-01-29'); assert.equal(month.at(-1),'2024-03-03'); assert.ok(month.includes('2024-02-29'));

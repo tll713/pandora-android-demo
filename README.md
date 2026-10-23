@@ -30,7 +30,7 @@
 - 任务支持多个负责人，截止时间精确到分钟。
 - 任务详情记录文字进展（不做百分比进度），任务完成无需审核。
 - 任务的创建、编辑、删除需提交申请，由具备审核权限的角色审核通过后生效；不能审核自己的申请，驳回必须填写原因。
-- 每人每天一篇综合工作日志，仅本人当天可修改；每次修改保留旧版本，历史日志只读。
+- 每人每天一篇综合工作日志，可补写或编辑最近三天；每次修改保留旧版本，更早日志只读。
 - 月、周、日工作视图，展示任务与日志分布。
 - Web 管理端：账号管理、任务派发、变更审核、日志查看、公告维护、数据统计。
 
@@ -117,7 +117,7 @@ npm.cmd run build:android
 | `POST /api/tasks/{id}/progress` | 记录任务文字进展 |
 | `POST /api/tasks/{id}/complete` | 标记任务完成（免审核） |
 | `POST /api/tasks/{id}/pin` | 置顶／取消置顶任务 |
-| `POST /api/logs`、`GET /api/logs/history` | 保存当日日志、查询历史日志 |
+| `POST /api/logs`、`GET /api/logs/history` | 保存最近三天的日志、查询历史日志 |
 | `GET /api/announcements` | 公告列表 |
 | `GET/POST /api/admin/users` | 账号查询与创建 |
 | `GET /api/admin/tasks`、`/admin/requests`、`/admin/logs`、`/admin/stats` | 管理端查询与统计 |

@@ -45,6 +45,7 @@ public class AuthService {
         claims.put("role", user.getRole().name());
         claims.put("name", user.getName());
         claims.put("dept", user.getDepartment());
+        claims.put("credentials", credentialStamp(user));
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expiration);
         return Jwts.builder()
@@ -58,10 +59,23 @@ public class AuthService {
 
     public String validateToken(String token) {
         try {
-            return Jwts.parser().verifyWith(secretKey).build()
-                    .parseSignedClaims(token).getPayload().getSubject();
+            var claims = Jwts.parser().verifyWith(secretKey).build()
+                    .parseSignedClaims(token).getPayload();
+            User user = userRepository.findById(claims.getSubject()).orElse(null);
+            return user != null && credentialStamp(user).equals(claims.get("credentials", String.class))
+                    ? user.getId() : null;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private String credentialStamp(User user) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(user.getPasswordHash().getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 }

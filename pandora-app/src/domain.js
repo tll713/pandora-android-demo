@@ -43,7 +43,7 @@ export const canSeeTask = (u, t) => Boolean(t && !t.deleted && (t.owners.include
 export const canWorkOnTask = (u, t) => Boolean(canSeeTask(u, t) && t.owners.includes(u.id));
 export const canManageTask = (u, t) => Boolean(isManager(u) && canSeeTask(u, t) && t.owners.every(id => canSeeUser(u, id)));
 export const visibleTasks = (db, u) => db.tasks.filter(t => canSeeTask(u, t));
-export const visibleLogs = (db, u) => db.logs.filter(l => canSeeUser(u, l.author));
+export const visibleLogs = (db, u) => db.logs.filter(l => l.author === u?.id);
 export const recentLogs = (db, u, today = dateKey()) => visibleLogs(db, u).filter(l => l.date >= dayOffset(-6, today) && l.date <= today);
 export const allowedAssignees = u => USERS.filter(v => v.role !== '管理员' && v.role !== 'ADMIN' && canSeeUser(u, v.id));
 export const isOverdue = (t, now = minuteKey()) => t.dueAt < now && t.status !== 'done';
@@ -116,14 +116,18 @@ export function completeTask(db, u, taskId, now = new Date()) {
   task.status = 'done'; task.completedAt = new Date(now).toISOString();
   task.history.push({ at: task.completedAt, actor: u.id, text: '标记任务完成，无需审核' }); return task;
 }
-export const canEditLog = (u, l, now = new Date()) => Boolean(l && l.author === u?.id && l.date === dateKey(now));
+export const canEditLog = (u, l, now = new Date()) => Boolean(l && l.author === u?.id && l.date >= dayOffset(-2, now) && l.date <= dateKey(now));
 export function saveLog(db, u, v, logId = null, now = new Date()) {
   requireValue(userById(u?.id), '请选择有效身份');
-  const existing = logId ? db.logs.find(l => l.id === logId) : db.logs.find(l => l.author === u.id && l.date === dateKey(now));
-  if (logId) requireValue(canEditLog(u, existing, now), '只能编辑本人当天的日志');
-  requireValue(!v.date || v.date === dateKey(now), '只能记录当天的日志');
+  const logDate = v.date || dateKey(now);
+  requireValue(isValidDate(logDate) && logDate >= dayOffset(-2, now) && logDate <= dateKey(now), '只能补写或编辑最近三天的日志');
+  const existing = logId ? db.logs.find(l => l.id === logId) : db.logs.find(l => l.author === u.id && l.date === logDate);
+  if (logId) {
+    requireValue(canEditLog(u, existing, now), '只能编辑本人最近三天的日志');
+    requireValue(existing.date === logDate, '不能修改日志日期');
+  }
   const content = cleaned(v.content, '工作内容', 3000);
-  const title = String(v.title || `${dateKey(now)} 工作日志`).trim();
+  const title = String(v.title || `${logDate} 工作日志`).trim();
   requireValue(title.length <= 80, '日志标题不能超过 80 个字');
   const taskId = v.taskId || '';
   if (taskId) requireValue(canSeeTask(u, db.tasks.find(t => t.id === taskId)), '不能关联无权查看的任务');
@@ -132,7 +136,7 @@ export function saveLog(db, u, v, logId = null, now = new Date()) {
     existing.versions.push({ title: existing.title, content: existing.content, taskId: existing.taskId, at: existing.updatedAt, actor: existing.author });
     Object.assign(existing, { title, content, taskId, updatedAt: at }); return existing;
   }
-  const log = { id: id('log'), author: u.id, date: dateKey(now), title, content, taskId, createdAt: at, updatedAt: at, versions: [] };
+  const log = { id: id('log'), author: u.id, date: logDate, title, content, taskId, createdAt: at, updatedAt: at, versions: [] };
   db.logs.unshift(log); return log;
 }
 export function createDemoAccount(db, u, values) {

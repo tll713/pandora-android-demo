@@ -24,20 +24,12 @@ public class LogService {
     }
 
     public List<WorkLog> getVisibleLogs(User user) {
-        if (user.isGlobal()) return workLogRepository.findAll();
-        if (user.isManager()) return workLogRepository.findByDepartment(user.getDepartment());
         return workLogRepository.findByAuthorId(user.getId());
     }
 
     public List<WorkLog> getRecentLogs(User user, int days) {
         LocalDate end = LocalDate.now();
         LocalDate start = end.minusDays(days - 1);
-        if (user.isGlobal()) return workLogRepository.findByDateBetween(start, end);
-        if (user.isManager()) {
-            return workLogRepository.findByDepartment(user.getDepartment()).stream()
-                    .filter(l -> !l.getDate().isBefore(start) && !l.getDate().isAfter(end))
-                    .collect(Collectors.toList());
-        }
         return workLogRepository.findByAuthorIdAndDateBetween(user.getId(), start, end);
     }
 
@@ -49,13 +41,27 @@ public class LogService {
     @Transactional
     public WorkLog saveLog(User author, Map<String, Object> values, String logId) {
         LocalDate today = LocalDate.now();
+        LocalDate earliest = today.minusDays(2);
+        String requestedDate = (String) values.get("date");
+        LocalDate logDate;
+        try {
+            logDate = requestedDate == null || requestedDate.isBlank() ? today : LocalDate.parse(requestedDate);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("日志日期格式不正确");
+        }
+        if (logDate.isBefore(earliest) || logDate.isAfter(today))
+            throw new IllegalArgumentException("只能补写或编辑最近三天的日志");
+
         WorkLog existing = null;
         if (logId != null) {
             existing = workLogRepository.findById(logId).orElse(null);
-            if (existing == null || !existing.getAuthorId().equals(author.getId()) || !existing.getDate().equals(today))
-                throw new IllegalArgumentException("只能编辑本人当天的日志");
+            if (existing == null || !existing.getAuthorId().equals(author.getId())
+                    || existing.getDate().isBefore(earliest) || existing.getDate().isAfter(today))
+                throw new IllegalArgumentException("只能编辑本人最近三天的日志");
+            if (!existing.getDate().equals(logDate))
+                throw new IllegalArgumentException("不能修改日志日期");
         } else {
-            existing = workLogRepository.findByAuthorIdAndDate(author.getId(), today).orElse(null);
+            existing = workLogRepository.findByAuthorIdAndDate(author.getId(), logDate).orElse(null);
         }
 
         String content = (String) values.get("content");
@@ -64,7 +70,7 @@ public class LogService {
         content = content.trim();
 
         String title = (String) values.get("title");
-        if (title == null || title.trim().isEmpty()) title = today.toString() + " 工作日志";
+        if (title == null || title.trim().isEmpty()) title = logDate + " 工作日志";
         title = title.trim();
         if (title.length() > 80) throw new IllegalArgumentException("日志标题不能超过 80 个字");
 
@@ -97,7 +103,7 @@ public class LogService {
         WorkLog log = new WorkLog();
         log.setId("log-" + UUID.randomUUID());
         log.setAuthorId(author.getId());
-        log.setDate(today);
+        log.setDate(logDate);
         log.setTitle(title);
         log.setContent(content);
         log.setTaskId(taskId);
