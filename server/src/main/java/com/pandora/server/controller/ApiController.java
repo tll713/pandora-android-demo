@@ -78,12 +78,26 @@ public class ApiController {
 
     // ============ 工作区数据（App） ============
 
+    @PostMapping("/auth/password")
+    public ResponseEntity<?> changePassword(@AuthenticationPrincipal UserDetails ud,
+                                           @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        try {
+            userService.changePassword(user, body.get("currentPassword"), body.get("newPassword"));
+            return ResponseEntity.ok(Map.of("message", "密码已修改，请重新登录"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @GetMapping("/workspace")
     public ResponseEntity<?> workspace(@AuthenticationPrincipal UserDetails ud) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         List<Task> tasks = taskService.getVisibleTasks(user);
-        List<WorkLog> logs = logService.getRecentLogs(user, 7);
+        // 同时覆盖本月日志统计和月初跨月的最近七天。
+        List<WorkLog> logs = logService.getRecentLogs(user, Math.max(7, LocalDate.now().getDayOfMonth()));
         List<ChangeRequest> requests = taskService.getVisibleRequests(user);
         List<Announcement> announcements = announcementService.getAll();
         List<String> pins = taskService.getUserPins(user.getId());

@@ -25,6 +25,20 @@ public class UserService {
     }
 
     @Transactional
+    public void changePassword(User user, String currentPassword, String newPassword) {
+        if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash()))
+            throw new IllegalArgumentException("原密码不正确");
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 64
+                || newPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 72
+                || newPassword.isBlank())
+            throw new IllegalArgumentException("新密码需为 8～64 位字符，最多 72 字节");
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash()))
+            throw new IllegalArgumentException("新密码不能与原密码相同");
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+    }
+
+    @Transactional
     public User createUser(User admin, String name, String login, String department, String role) {
         if (admin.getRole() != User.Role.ADMIN) throw new IllegalArgumentException("只有管理员可以创建账号");
         if (name == null || name.trim().isEmpty()) throw new IllegalArgumentException("请填写姓名");

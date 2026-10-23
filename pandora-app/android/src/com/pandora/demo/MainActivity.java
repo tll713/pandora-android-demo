@@ -98,7 +98,7 @@ public final class MainActivity extends Activity {
     }
     @Override public void onBackPressed() {
         web.evaluateJavascript("Boolean(window.pandoraBack && window.pandoraBack())", result -> {
-            if (!"true".equals(result)) new AlertDialog.Builder(this).setTitle("退出演示？").setMessage("已保存的记录会保留在本机。")
+            if (!"true".equals(result)) new AlertDialog.Builder(this).setTitle("退出潘多拉？").setMessage("确认关闭当前应用吗？")
                 .setPositiveButton("退出", (dialog, which) -> finish()).setNegativeButton("继续使用", null).show();
         });
     }
