@@ -25,7 +25,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .orElseThrow(() -> new UsernameNotFoundException("用户不存在: " + username));
         return new org.springframework.security.core.userdetails.User(
                 user.getId(),
-                user.getPasswordHash(),
+                user.getPasswordHash(), user.isEnabled(), true, true, true,
                 List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
         );
     }

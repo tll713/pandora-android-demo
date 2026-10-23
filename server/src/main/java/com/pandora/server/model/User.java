@@ -21,6 +21,16 @@ public class User {
     @Column(name = "created_at", insertable = false, updatable = false)
     private java.time.LocalDateTime createdAt;
 
+    @Column(nullable = false)
+    private boolean enabled = true;
+    @Column(name = "auth_version", nullable = false)
+    private long authVersion = 0;
+
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public long getAuthVersion() { return authVersion; }
+    public void setAuthVersion(long authVersion) { this.authVersion = authVersion; }
+
     public enum Role {
         ADMIN, FOUNDER, DEPT_MANAGER, TEAM_LEAD, EMPLOYEE
     }

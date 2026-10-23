@@ -253,6 +253,43 @@ public class ApiController {
         }
     }
 
+    @PutMapping("/admin/users/{id}")
+    public ResponseEntity<?> adminUpdateUser(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                             @RequestBody Map<String, Object> body) {
+        User actor = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (actor.getRole() != User.Role.ADMIN) return ResponseEntity.status(403).body(Map.of("error", "只有管理员可以维护账号"));
+        try {
+            User updated = userService.updateUser(actor, id, (String) body.get("name"),
+                    (String) body.get("department"), (String) body.get("role"), Boolean.TRUE.equals(body.get("enabled")));
+            return ResponseEntity.ok(userToMap(updated));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/admin/users/{id}/password")
+    public ResponseEntity<?> adminResetPassword(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                                @RequestBody Map<String, String> body) {
+        User actor = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (actor.getRole() != User.Role.ADMIN) return ResponseEntity.status(403).body(Map.of("error", "只有管理员可以维护账号"));
+        try {
+            userService.resetPassword(actor, id, body.get("password"));
+            return ResponseEntity.ok(Map.of("message", "密码已重置，原登录状态已失效"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/admin/announcements/{id}")
+    public ResponseEntity<?> adminUpdateAnnouncement(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(announcementToMap(announcementService.update(id, (String) body.get("title"),
+                    (String) body.get("content"), (String) body.get("category"), Boolean.TRUE.equals(body.get("pinned")))));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @GetMapping("/admin/tasks")
     public ResponseEntity<?> adminTasks(@AuthenticationPrincipal UserDetails ud) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
@@ -326,6 +363,8 @@ public class ApiController {
     private Map<String, Object> userToMap(User u) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", u.getId());
+        m.put("login", u.getId());
+        m.put("enabled", u.isEnabled());
         m.put("name", u.getName());
         m.put("department", u.getDepartment());
         m.put("role", u.getRole().name());
@@ -382,6 +421,8 @@ public class ApiController {
         m.put("expectedRevision", r.getExpectedRevision());
         m.put("reason", r.getReason());
         m.put("reviewer", r.getReviewerId());
+        m.put("reviewerName", r.getReviewerId() != null
+                ? userRepository.findById(r.getReviewerId()).map(User::getName).orElse(r.getReviewerId()) : null);
         m.put("createdAt", r.getCreatedAt().toString());
         m.put("reviewedAt", r.getReviewedAt() != null ? r.getReviewedAt().toString() : null);
         return m;
@@ -417,6 +458,7 @@ public class ApiController {
         m.put("content", a.getContent());
         m.put("category", a.getCategory());
         m.put("date", a.getDate().toString());
+        m.put("pinned", a.isPinned());
         return m;
     }
 

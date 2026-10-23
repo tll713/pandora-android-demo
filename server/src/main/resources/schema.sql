@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS users (
   avatar VARCHAR(10),
   color VARCHAR(10),
   password_hash VARCHAR(100) NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  auth_version BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -87,7 +89,8 @@ CREATE TABLE IF NOT EXISTS announcements (
   title VARCHAR(120) NOT NULL,
   content TEXT NOT NULL,
   category VARCHAR(40) NOT NULL,
-  date DATE NOT NULL
+  date DATE NOT NULL,
+  pinned BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS pins (
@@ -98,3 +101,26 @@ CREATE TABLE IF NOT EXISTS pins (
   FOREIGN KEY (user_id) REFERENCES users(id),
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
+
+-- Upgrade existing installations without dropping business data.
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'enabled') = 0,
+  'ALTER TABLE users ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'auth_version') = 0,
+  'ALTER TABLE users ADD COLUMN auth_version BIGINT NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'announcements' AND column_name = 'pinned') = 0,
+  'ALTER TABLE announcements ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT FALSE', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;

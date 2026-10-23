@@ -1,258 +1,41 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>潘多拉智能掌上工作系统 · 管理后台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173e35">
+  <title>潘多拉 · 管理工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23173e35'/%3E%3Cpath d='M12 29V11h9a7 7 0 0 1 0 14h-4v4m0-9h4a2 2 0 0 0 0-4h-4z' fill='%23dcebc6'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
 </head>
 <body>
-
-  <!-- 登录页 -->
-  <div id="login-view" class="login-view hidden">
-    <div class="login-card">
-      <div class="login-logo">
-        <div class="login-logo-icon">潘</div>
-        <h1>潘多拉管理后台</h1>
-        <p>智能掌上工作系统 · Web 管理端</p>
-      </div>
-      <form id="login-form">
-        <div class="form-group">
-          <label for="login-username">账号</label>
-          <input type="text" id="login-username" placeholder="请输入账号" autocomplete="username" required>
-        </div>
-        <div class="form-group">
-          <label for="login-password">密码</label>
-          <input type="password" id="login-password" placeholder="请输入密码" autocomplete="current-password" required>
-        </div>
-        <div id="login-error" class="login-error hidden"></div>
-        <button type="submit" class="btn btn-primary btn-block" id="login-btn">登 录</button>
-      </form>
+  <div id="login-view" class="login-view" hidden>
+    <section class="login-story">
+      <a class="brand" href="#"><span class="brand-mark">P<span></span></span><span>潘多拉<span class="brand-en">PANDORA WORKSPACE</span></span></a>
+      <div class="story-copy"><span class="eyebrow light">让协作，井然有序</span><h1>看见每一份进展，<br>连接每一次协作。</h1><p>从任务派发到工作复盘，<br>让团队的每一天，都有清晰的方向。</p></div>
+      <div class="story-preview" aria-hidden="true"><div class="preview-top"><span class="preview-dot"></span>团队工作空间<span>WORKSPACE</span></div><div class="preview-row"><span>01</span><div><strong>目标清晰</strong><small>任务、负责人、截止时间，一目了然</small></div><b>↗</b></div><div class="preview-row"><span>02</span><div><strong>协作有序</strong><small>每一项变更，都有据可循</small></div><b>↗</b></div><div class="preview-row"><span>03</span><div><strong>进展可见</strong><small>汇聚工作记录，沉淀团队成果</small></div><b>↗</b></div></div>
+      <footer>潘多拉智能掌上工作系统 <span>管理端 / ADMIN</span></footer>
+    </section>
+    <main class="login-main"><div class="login-card"><span class="eyebrow">ADMIN CONSOLE</span><h2>欢迎回到工作台</h2><p class="muted">使用管理员或创始人账号登录</p><form id="login-form"><label>登录账号<input name="username" autocomplete="username" placeholder="请输入账号" required maxlength="30"></label><label>登录密码<input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="login-error" class="inline-error" role="alert" hidden></p><button class="btn primary login-submit" type="submit">登录工作台 <span>→</span></button></form><div class="login-note"><span class="small-lock">◇</span> 企业管理空间 · 仅授权管理人员可访问</div></div><footer>清晰管理 · 高效协同</footer></main>
+  </div>
+  <div id="app-view" class="app-shell" hidden>
+    <aside id="sidebar" class="sidebar">
+      <a class="brand" href="#dashboard"><span class="brand-mark">P<span></span></span><span>潘多拉<span class="brand-en">PANDORA WORKSPACE</span></span></a>
+      <div class="nav-label">工作空间</div>
+      <nav id="navigation" aria-label="主导航"></nav>
+      <div class="sidebar-note"><span class="note-leaf">✧</span><strong>让每一份努力被看见</strong><p>聚焦目标，记录进展，<br>与团队一起向前。</p></div>
+      <div class="sidebar-account"><span class="avatar" id="side-avatar"></span><div><strong id="side-name"></strong><small id="side-role"></small></div><button class="icon-button" data-action="logout" aria-label="退出登录" title="退出登录" id="logout-btn"></button></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><div class="topbar-left"><button class="icon-button mobile-menu" data-action="menu" aria-label="展开导航"></button><span class="breadcrumb">管理空间 <span>/</span> <strong id="breadcrumb-title">工作台</strong></span></div><div class="topbar-right"><span id="today-label"></span><span class="header-divider"></span><span class="connection"><i></i>团队管理空间</span></div></header>
+      <main id="main" tabindex="-1"><div class="page-heading"><div><span class="eyebrow" id="page-kicker">OVERVIEW</span><h1 id="page-title">工作台</h1><p id="page-description"></p></div><div class="heading-actions"><span id="refresh-time" class="muted"></span><button class="btn" data-action="refresh" id="refresh-btn"></button><button class="btn primary" id="primary-action" data-action="new-task"></button></div></div><div id="page-content" aria-live="polite"></div></main>
+      <footer class="workspace-footer"><span>PANDORA · 潘多拉智能掌上工作系统</span><span>专注协作，让工作有迹可循</span></footer>
     </div>
   </div>
-
-  <!-- 主界面 -->
-  <div id="app-view" class="app-view hidden">
-    <!-- 侧边导航 -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-logo-icon">潘</div>
-        <div>
-          <div class="sidebar-title">潘多拉</div>
-          <div class="sidebar-subtitle">管理后台</div>
-        </div>
-      </div>
-      <nav class="sidebar-nav">
-        <a class="nav-item active" data-page="dashboard">
-          <span class="nav-icon">◈</span>数据概览
-        </a>
-        <a class="nav-item" data-page="users">
-          <span class="nav-icon">◉</span>组织与权限
-        </a>
-        <a class="nav-item" data-page="announcements">
-          <span class="nav-icon">◆</span>公司事项
-        </a>
-        <a class="nav-item" data-page="tasks">
-          <span class="nav-icon">▣</span>任务管理
-        </a>
-        <a class="nav-item" data-page="logs">
-          <span class="nav-icon">▤</span>日志管理
-        </a>
-      </nav>
-      <div class="sidebar-footer">
-        <div class="current-user" id="current-user"></div>
-        <a class="nav-item nav-logout" id="logout-btn">
-          <span class="nav-icon">⏻</span>退出登录
-        </a>
-      </div>
-    </aside>
-
-    <!-- 内容区 -->
-    <main class="main">
-
-      <!-- 数据概览 -->
-      <section id="page-dashboard" class="page">
-        <div class="page-header">
-          <h2>数据概览</h2>
-          <p class="page-desc">系统核心数据一览</p>
-        </div>
-        <div class="stats-grid" id="stats-grid"></div>
-      </section>
-
-      <!-- 组织与权限 -->
-      <section id="page-users" class="page hidden">
-        <div class="page-header">
-          <h2>组织与权限</h2>
-          <p class="page-desc">管理团队成员与角色权限</p>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h3>创建用户</h3>
-          </div>
-          <form id="user-form" class="inline-form">
-            <div class="form-group">
-              <label>姓名</label>
-              <input type="text" id="user-name" placeholder="如：王小明" required>
-            </div>
-            <div class="form-group">
-              <label>账号</label>
-              <input type="text" id="user-login" placeholder="登录账号" required>
-            </div>
-            <div class="form-group">
-              <label>部门</label>
-              <input type="text" id="user-department" placeholder="如：产品部" required>
-            </div>
-            <div class="form-group">
-              <label>角色</label>
-              <select id="user-role" required>
-                <option value="EMPLOYEE">员工</option>
-                <option value="TEAM_LEAD">团队长</option>
-                <option value="DEPT_MANAGER">部门负责人</option>
-              </select>
-            </div>
-            <div class="form-group form-group-action">
-              <button type="submit" class="btn btn-primary">创建用户</button>
-            </div>
-          </form>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h3>用户列表</h3>
-            <span class="card-meta" id="users-count"></span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>姓名</th>
-                  <th>账号</th>
-                  <th>部门</th>
-                  <th>角色</th>
-                </tr>
-              </thead>
-              <tbody id="users-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- 公司事项 -->
-      <section id="page-announcements" class="page hidden">
-        <div class="page-header">
-          <h2>公司事项</h2>
-          <p class="page-desc">发布与管理公司公告</p>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h3>发布公告</h3>
-          </div>
-          <form id="announcement-form" class="stack-form">
-            <div class="form-row">
-              <div class="form-group">
-                <label>标题</label>
-                <input type="text" id="ann-title" placeholder="公告标题" required>
-              </div>
-              <div class="form-group">
-                <label>分类</label>
-                <input type="text" id="ann-category" placeholder="如：通知 / 制度 / 活动" required>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>内容</label>
-              <textarea id="ann-content" rows="4" placeholder="公告正文内容" required></textarea>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary">发布公告</button>
-            </div>
-          </form>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h3>公告列表</h3>
-            <span class="card-meta" id="ann-count"></span>
-          </div>
-          <div id="announcements-list" class="ann-list"></div>
-        </div>
-      </section>
-
-      <!-- 任务管理 -->
-      <section id="page-tasks" class="page hidden">
-        <div class="page-header">
-          <h2>任务管理</h2>
-          <p class="page-desc">查看全部任务与变更审核</p>
-        </div>
-        <div class="tabs">
-          <button class="tab active" data-tab="task-list">任务列表</button>
-          <button class="tab" data-tab="review-queue">审核队列 <span id="review-badge" class="badge hidden"></span></button>
-        </div>
-
-        <div id="tab-task-list" class="tab-pane">
-          <div class="card">
-            <div class="card-header">
-              <h3>全部任务</h3>
-              <span class="card-meta" id="tasks-count"></span>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>标题</th>
-                    <th>负责人</th>
-                    <th>状态</th>
-                    <th>优先级</th>
-                    <th>截止时间</th>
-                  </tr>
-                </thead>
-                <tbody id="tasks-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div id="tab-review-queue" class="tab-pane hidden">
-          <div class="card">
-            <div class="card-header">
-              <h3>待审核申请</h3>
-              <span class="card-meta" id="requests-count"></span>
-            </div>
-            <div id="requests-list" class="request-list"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 日志管理 -->
-      <section id="page-logs" class="page hidden">
-        <div class="page-header">
-          <h2>日志管理</h2>
-          <p class="page-desc">全员工作日志汇总</p>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h3>全部日志</h3>
-            <span class="card-meta" id="logs-count"></span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>作者</th>
-                  <th>日期</th>
-                  <th>标题</th>
-                  <th>内容摘要</th>
-                </tr>
-              </thead>
-              <tbody id="logs-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-    </main>
-  </div>
-
-  <!-- 全局提示 -->
-  <div id="toast" class="toast hidden"></div>
-
-  <script src="app.js"></script>
+  <dialog id="detail-dialog" class="drawer" aria-labelledby="dialog-title"><div class="dialog-heading"><div><span class="eyebrow" id="dialog-kicker">DETAIL</span><h2 id="dialog-title"></h2></div><button class="icon-button" data-action="close-dialog" aria-label="关闭"></button></div><div id="dialog-content"></div></dialog>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"><form id="confirm-form"><span class="confirm-icon">!</span><h2 id="confirm-title"></h2><p id="confirm-description"></p><div class="form-actions"><button class="btn" type="button" data-action="cancel-confirm">取消</button><button class="btn primary" type="submit" id="confirm-submit">确认</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="boot-state" class="boot-state"><span class="spinner"></span><p>正在进入管理工作台…</p></div>
 </body>
 </html>

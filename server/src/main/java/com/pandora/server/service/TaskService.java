@@ -73,9 +73,9 @@ public class TaskService {
 
     public List<User> getAllowedAssignees(User user) {
         if (user.isGlobal()) return userRepository.findAll().stream()
-                .filter(u -> u.getRole() != User.Role.ADMIN).collect(Collectors.toList());
+                .filter(u -> u.isEnabled() && u.getRole() != User.Role.ADMIN).collect(Collectors.toList());
         if (user.isManager()) return userRepository.findAll().stream()
-                .filter(u -> u.getDepartment().equals(user.getDepartment()) && u.getRole() != User.Role.ADMIN)
+                .filter(u -> u.isEnabled() && u.getDepartment().equals(user.getDepartment()) && u.getRole() != User.Role.ADMIN)
                 .collect(Collectors.toList());
         return List.of(user);
     }
@@ -115,6 +115,7 @@ public class TaskService {
     }
 
     private Map<String, Object> validateTaskValues(User proposer, Map<String, Object> values) {
+        if (values == null) throw new IllegalArgumentException("请填写任务信息");
         List<String> owners = (List<String>) values.get("owners");
         if (owners == null || owners.isEmpty()) throw new IllegalArgumentException("请选择管理范围内的负责人");
         Set<String> allowedIds = getAllowedAssignees(proposer).stream().map(User::getId).collect(Collectors.toSet());
@@ -127,6 +128,8 @@ public class TaskService {
         String dueAt = (String) values.get("dueAt");
         if (dueAt == null || !dueAt.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}")) 
             throw new IllegalArgumentException("截止时间需精确到分钟");
+        try { LocalDateTime.parse(dueAt); }
+        catch (java.time.DateTimeException e) { throw new IllegalArgumentException("请输入有效的截止时间"); }
         String priority = (String) values.get("priority");
         if (!Set.of("high", "medium", "low").contains(priority)) throw new IllegalArgumentException("请选择优先级");
         String detail = (String) values.get("detail");
@@ -135,7 +138,7 @@ public class TaskService {
 
         Map<String, Object> result = new HashMap<>();
         result.put("title", title);
-        result.put("owners", owners);
+        result.put("owners", owners.stream().distinct().toList());
         result.put("dueAt", dueAt);
         result.put("priority", priority);
         result.put("detail", detail);
