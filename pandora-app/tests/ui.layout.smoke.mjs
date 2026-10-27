@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require(path.join(process.env.PANDORA_RUNTIME_MODULES || 'C:/Users/26674/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules', 'playwright'));
-const browser = await chromium.launch({ executablePath: process.env.PANDORA_BROWSER || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
+const { chromium } = require(path.join(process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'), 'playwright'));
+const browser = await chromium.launch({ channel: process.env.PANDORA_BROWSER_CHANNEL || 'msedge', headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'Asia/Shanghai', locale: 'zh-CN', isMobile: true, hasTouch: true });
 const page = await context.newPage();
 const today = await page.evaluate(() => {
@@ -33,25 +34,25 @@ try {
   await page.locator('[data-close]').click();
 
   await page.locator('[data-route="calendar"]').click();
-  assert.equal(await page.locator('.calendar-day.is-today .day-task').count(), 2, 'month cells should cap visible tasks');
-  assert.equal(await page.locator('.calendar-day.is-today .day-more').innerText(), '还有 3 项');
-  await page.locator('.calendar-day.is-today .day-more').click();
-  assert.equal(await page.locator('.day-task').count(), 5, 'day view should show all tasks on the selected date');
-  assert.equal(await page.locator('.day-log').count(), 0, 'calendar must not render logs');
+  assert.equal(await page.locator('.calendar-day.is-today .day-task').count(), 0, 'month cells show markers only');
+  assert.equal(await page.locator('.calendar-day.is-today .calendar-dot').count(), 5, 'month cell shows task dots plus a log dot');
+  await page.locator('.calendar-day.is-today .day-summary').click();
+  assert.equal(await page.locator('.timeline-item').count(), 6, 'day view should show tasks and logs on the selected date');
+  assert.equal(await page.locator('.timeline-item.event--log').count(), 1, 'calendar should render the day log');
   await page.locator('[data-task-view="list"]').click();
-  assert.equal(await page.locator('.task-card').count(), 5, 'task management list should live inside the view');
+  assert.equal(await page.locator('.task-table tbody tr').count(), 5, 'task table should live inside the view');
 
   await page.locator('[data-task-view="calendar"]').click();
   await page.locator('.segment[data-mode="month"]').click();
   await page.locator('.calendar-day.is-today .day-date').click();
-  assert.equal(await page.locator('.day-task').count(), 5);
+  assert.equal(await page.locator('.timeline-item').count(), 6);
   for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 844 }, { width: 1280, height: 900 }]) {
     await page.setViewportSize(viewport);
     await page.locator('[data-route="dashboard"]').click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight), false, `${viewport.width}x${viewport.height} home should remain one screen`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${viewport.width}px home should not overflow horizontally`);
   }
-  console.log('UI layout smoke passed: single-screen home, four tiles, task-only calendar, and task list in views.');
+  console.log('UI layout smoke passed: single-screen home, four tiles, task-and-log calendar, and task list in views.');
 } finally {
   await browser.close();
 }

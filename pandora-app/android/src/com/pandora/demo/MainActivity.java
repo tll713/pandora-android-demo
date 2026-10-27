@@ -2,6 +2,8 @@ package com.pandora.demo;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.ActivityNotFoundException;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.net.Uri;
@@ -12,6 +14,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
+import android.webkit.ValueCallback;
 import android.widget.Toast;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -23,11 +26,12 @@ import java.util.Arrays;
 
 public final class MainActivity extends Activity {
     private WebView web;
+    private ValueCallback<Uri[]> fileCallback;
+    private static final int AVATAR_REQUEST = 101;
     private static final String ORIGIN = "appassets.androidplatform.net";
     private static final Set<String> FILES = new HashSet<>(Arrays.asList("index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/style.css", "src/mobile.css"));
-    private static final Set<String> API_ORIGINS = new HashSet<>(Arrays.asList("localhost", "127.0.0.1", "10.0.2.2", "172.20.10.3"));
     // 模拟器通过 10.0.2.2 访问宿主机后端；真机调试时改为电脑局域网 IP
-    private static final String API_BASE = "http://172.20.10.3:8080/api";
+    private static final String API_BASE = "http://10.152.248.160:8080/api";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -44,10 +48,25 @@ public final class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);
-        settings.setAllowContentAccess(false);
+        settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.3.0");
-        web.setWebChromeClient(new WebChromeClient());
+        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.4.1");
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = callback;
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("image/*");
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/jpeg", "image/png", "image/webp"});
+                try { startActivityForResult(intent, AVATAR_REQUEST); }
+                catch (ActivityNotFoundException e) {
+                    fileCallback.onReceiveValue(null); fileCallback = null;
+                    Toast.makeText(MainActivity.this, "未找到可用的图片选择器", Toast.LENGTH_SHORT).show();
+                }
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 return false;
@@ -61,7 +80,7 @@ public final class MainActivity extends Activity {
                 try {
                     String mime = file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html";
                     Map<String, String> headers = new HashMap<>();
-                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:8080 http://127.0.0.1:8080 http://10.0.2.2:8080 http://172.20.10.3:8080; object-src 'none'; base-uri 'self'";
+                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " + apiOrigin() + "; object-src 'none'; base-uri 'self'";
                     InputStream body;
                     if (file.equals("index.html")) {
                         // 在页面脚本执行前注入 API 基地址；nonce 保证 CSP 下仅这段内联脚本可执行
@@ -88,13 +107,23 @@ public final class MainActivity extends Activity {
         web.loadUrl("https://" + ORIGIN + "/index.html");
     }
     private boolean isLocal(Uri url) { return "https".equals(url.getScheme()) && ORIGIN.equals(url.getHost()); }
+    private static String apiOrigin() {
+        Uri api = Uri.parse(API_BASE);
+        return api.getScheme() + "://" + api.getAuthority();
+    }
     private boolean isApi(Uri url) {
-        String host = url.getHost();
-        int port = url.getPort();
-        return API_ORIGINS.contains(host) && (port == 8080 || port == -1);
+        Uri api = Uri.parse(API_BASE);
+        return api.getScheme().equals(url.getScheme()) && api.getAuthority().equals(url.getAuthority());
     }
     private WebResourceResponse response(int status, String reason, String mime, String text) {
         return new WebResourceResponse(mime, "UTF-8", status, reason, new HashMap<>(), new ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == AVATAR_REQUEST && fileCallback != null) {
+            fileCallback.onReceiveValue(resultCode == RESULT_OK && data != null && data.getData() != null ? new Uri[]{data.getData()} : null);
+            fileCallback = null;
+        }
     }
     @Override public void onBackPressed() {
         web.evaluateJavascript("Boolean(window.pandoraBack && window.pandoraBack())", result -> {
@@ -102,5 +131,5 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("退出", (dialog, which) -> finish()).setNegativeButton("继续使用", null).show();
         });
     }
-    @Override protected void onDestroy() { web.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { if (fileCallback != null) {fileCallback.onReceiveValue(null);fileCallback=null;} web.destroy(); super.onDestroy(); }
 }

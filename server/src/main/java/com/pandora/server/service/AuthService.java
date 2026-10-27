@@ -13,10 +13,13 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
 public class AuthService {
+
+    public record LoginResult(String token, User user) {}
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -32,12 +35,30 @@ public class AuthService {
         this.expiration = expiration;
     }
 
-    public String authenticate(String username, String rawPassword) {
-        User user = userRepository.findById(username).orElse(null);
-        if (user == null || !user.isEnabled() || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
-            throw new IllegalArgumentException("用户名或密码错误");
+    public String authenticate(String identifier, String rawPassword) {
+        return login(identifier, rawPassword).token();
+    }
+
+    public LoginResult login(String identifier, String rawPassword) {
+        if (identifier == null || identifier.isBlank() || rawPassword == null)
+            throw new IllegalArgumentException("手机号/姓名或密码错误");
+        String value = identifier.trim();
+        List<User> candidates;
+        if (value.matches("^\\+?[0-9\\s()-]{7,24}$")) {
+            String phone = value.replaceAll("[\\s()-]", "");
+            candidates = userRepository.findByPhone(phone);
+        } else {
+            candidates = userRepository.findByName(value);
         }
-        return generateToken(user);
+        User matched = null;
+        for (User candidate : candidates) {
+            if (candidate.isEnabled() && passwordEncoder.matches(rawPassword, candidate.getPasswordHash())) {
+                if (matched != null) throw new IllegalArgumentException("手机号/姓名或密码错误");
+                matched = candidate;
+            }
+        }
+        if (matched == null) throw new IllegalArgumentException("手机号/姓名或密码错误");
+        return new LoginResult(generateToken(matched), matched);
     }
 
     private String generateToken(User user) {

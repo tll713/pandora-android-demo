@@ -84,8 +84,9 @@ public class TaskService {
 
     @Transactional
     public ChangeRequest requestTaskChange(User proposer, String kind, Map<String, Object> values, String taskId) {
-        if (!proposer.isManager()) throw new IllegalArgumentException("当前身份不能提交任务变更");
         if (!Set.of("create", "edit", "delete").contains(kind)) throw new IllegalArgumentException("未知变更类型");
+        if (!"create".equals(kind) && !proposer.isManager())
+            throw new IllegalArgumentException("当前身份不能编辑或删除任务");
 
         Task task = null;
         if (!"create".equals(kind)) {

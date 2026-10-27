@@ -22,11 +22,13 @@ test('creation becomes visible to both owners only after independent review',()=
   assert.equal(canSeeTask(userById('chen'),task),false); assert.equal(task.createdAt,r.createdAt);
   assert.throws(()=>reviewTaskChange(data,founder,r.id,true),/待处理/);
 });
-test('task creation rejects missing owners, cross-department owners, malformed dates and employee requests',()=>{
+test('task creation rejects invalid owners and dates while employees can only request themselves',()=>{
   for (const v of [{...values,owners:[]},{...values,owners:['lin','chen']},{...values,dueAt:'2026-02-30T12:00'},{...values,dueAt:'2026-10-15T24:00'},{...values,dueAt:'2026-10-15'}]) {
     const data=db(); assert.throws(()=>createTask(data,manager,v)); assert.equal(data.requests.length,0);
   }
-  assert.throws(()=>createTask(db(),lin,values),/不能提交/);
+  const employeeDb=db(), employeeRequest=createTask(employeeDb,lin,{...values,owners:['lin']},now);
+  assert.equal(employeeRequest.status,'pending'); assert.deepEqual(employeeRequest.after.owners,['lin']);
+  assert.throws(()=>createTask(db(),lin,values),/负责人/);
   assert.equal(isValidMinute('2026-10-15T23:59'),true);
 });
 test('either assigned owner can record text progress and complete immediately without approval',()=>{
@@ -40,7 +42,7 @@ test('nonowners cannot execute work; denied operations leave data untouched',()=
   const data=db(), before=structuredClone(data);
   assert.throws(()=>updateTaskDetail(data,manager,'t1','代写'),/负责人/);
   assert.throws(()=>completeTask(data,manager,'t1'),/负责人/);
-  assert.throws(()=>requestTaskChange(data,lin,'edit',values,'t1'),/不能提交/);
+  assert.throws(()=>requestTaskChange(data,lin,'edit',values,'t1'),/不能编辑或删除/);
   assert.deepEqual(data,before);
 });
 test('pending edit preserves original; approval preserves progress recorded while awaiting review',()=>{

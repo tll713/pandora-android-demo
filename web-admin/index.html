@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#173e35">
-  <title>潘多拉 · 管理工作台</title>
+  <title>潘多拉 · 企业内容管理</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23173e35'/%3E%3Cpath d='M12 29V11h9a7 7 0 0 1 0 14h-4v4m0-9h4a2 2 0 0 0 0-4h-4z' fill='%23dcebc6'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
@@ -13,29 +13,28 @@
   <div id="login-view" class="login-view" hidden>
     <section class="login-story">
       <a class="brand" href="#"><span class="brand-mark">P<span></span></span><span>潘多拉<span class="brand-en">PANDORA WORKSPACE</span></span></a>
-      <div class="story-copy"><span class="eyebrow light">让协作，井然有序</span><h1>看见每一份进展，<br>连接每一次协作。</h1><p>从任务派发到工作复盘，<br>让团队的每一天，都有清晰的方向。</p></div>
-      <div class="story-preview" aria-hidden="true"><div class="preview-top"><span class="preview-dot"></span>团队工作空间<span>WORKSPACE</span></div><div class="preview-row"><span>01</span><div><strong>目标清晰</strong><small>任务、负责人、截止时间，一目了然</small></div><b>↗</b></div><div class="preview-row"><span>02</span><div><strong>协作有序</strong><small>每一项变更，都有据可循</small></div><b>↗</b></div><div class="preview-row"><span>03</span><div><strong>进展可见</strong><small>汇聚工作记录，沉淀团队成果</small></div><b>↗</b></div></div>
+      <div class="story-copy"><span class="eyebrow light">企业信息管理</span><h1>组织账号清晰，<br>公司通知直达。</h1><p>统一维护成员与部门信息，<br>及时发布公司公告。</p></div>
+      <div class="story-preview" aria-hidden="true"><div class="preview-top"><span class="preview-dot"></span>组织与公告<span>ADMIN</span></div><div class="preview-row"><span>01</span><div><strong>组织与账号</strong><small>维护成员资料、部门和账号状态</small></div><b>↗</b></div><div class="preview-row"><span>02</span><div><strong>公司公告</strong><small>发布通知并管理公告置顶</small></div><b>↗</b></div></div>
       <footer>潘多拉智能掌上工作系统 <span>管理端 / ADMIN</span></footer>
     </section>
-    <main class="login-main"><div class="login-card"><span class="eyebrow">ADMIN CONSOLE</span><h2>欢迎回到工作台</h2><p class="muted">使用管理员或创始人账号登录</p><form id="login-form"><label>登录账号<input name="username" autocomplete="username" placeholder="请输入账号" required maxlength="30"></label><label>登录密码<input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="login-error" class="inline-error" role="alert" hidden></p><button class="btn primary login-submit" type="submit">登录工作台 <span>→</span></button></form><div class="login-note"><span class="small-lock">◇</span> 企业管理空间 · 仅授权管理人员可访问</div></div><footer>清晰管理 · 高效协同</footer></main>
+    <main class="login-main"><div class="login-card"><span class="eyebrow">ADMIN CONSOLE</span><h2>企业内容管理</h2><p class="muted">使用管理员或创始人的手机号或姓名登录</p><form id="login-form"><label>手机号或姓名<input name="identifier" autocomplete="username" placeholder="请输入手机号或姓名" required maxlength="30"></label><label>登录密码<input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="login-error" class="inline-error" role="alert" hidden></p><button class="btn primary login-submit" type="submit">登录管理端 <span>→</span></button></form><div class="login-note"><span class="small-lock">◇</span> 企业管理空间 · 仅授权管理人员可访问</div></div><footer>组织账号 · 公司公告 · 十大内容</footer></main>
   </div>
   <div id="app-view" class="app-shell" hidden>
     <aside id="sidebar" class="sidebar">
-      <a class="brand" href="#dashboard"><span class="brand-mark">P<span></span></span><span>潘多拉<span class="brand-en">PANDORA WORKSPACE</span></span></a>
-      <div class="nav-label">工作空间</div>
+      <a class="brand" href="#users"><span class="brand-mark">P<span></span></span><span>潘多拉<span class="brand-en">PANDORA WORKSPACE</span></span></a>
+      <div class="nav-label">公司管理</div>
       <nav id="navigation" aria-label="主导航"></nav>
-      <div class="sidebar-note"><span class="note-leaf">✧</span><strong>让每一份努力被看见</strong><p>聚焦目标，记录进展，<br>与团队一起向前。</p></div>
       <div class="sidebar-account"><span class="avatar" id="side-avatar"></span><div><strong id="side-name"></strong><small id="side-role"></small></div><button class="icon-button" data-action="logout" aria-label="退出登录" title="退出登录" id="logout-btn"></button></div>
     </aside>
     <div class="workspace">
-      <header class="topbar"><div class="topbar-left"><button class="icon-button mobile-menu" data-action="menu" aria-label="展开导航"></button><span class="breadcrumb">管理空间 <span>/</span> <strong id="breadcrumb-title">工作台</strong></span></div><div class="topbar-right"><span id="today-label"></span><span class="header-divider"></span><span class="connection"><i></i>团队管理空间</span></div></header>
-      <main id="main" tabindex="-1"><div class="page-heading"><div><span class="eyebrow" id="page-kicker">OVERVIEW</span><h1 id="page-title">工作台</h1><p id="page-description"></p></div><div class="heading-actions"><span id="refresh-time" class="muted"></span><button class="btn" data-action="refresh" id="refresh-btn"></button><button class="btn primary" id="primary-action" data-action="new-task"></button></div></div><div id="page-content" aria-live="polite"></div></main>
-      <footer class="workspace-footer"><span>PANDORA · 潘多拉智能掌上工作系统</span><span>专注协作，让工作有迹可循</span></footer>
+      <header class="topbar"><div class="topbar-left"><button class="icon-button mobile-menu" data-action="menu" aria-label="展开导航"></button><span class="breadcrumb">公司管理 <span>/</span> <strong id="breadcrumb-title">组织与账号</strong></span></div><div class="topbar-right"><span id="today-label"></span><span class="header-divider"></span><span class="connection"><i></i>企业内容管理</span></div></header>
+      <main id="main" tabindex="-1"><div class="page-heading"><div><span class="eyebrow" id="page-kicker">ORGANIZATION &amp; ACCOUNTS</span><h1 id="page-title">组织与账号</h1><p id="page-description"></p></div><div class="heading-actions"><span id="refresh-time" class="muted"></span><button class="btn" data-action="refresh" id="refresh-btn"></button><button class="btn primary" id="primary-action" data-action="new-user"></button></div></div><div id="page-content" aria-live="polite"></div></main>
+      <footer class="workspace-footer"><span>PANDORA · 潘多拉智能掌上工作系统</span><span>组织与账号 · 公司公告 · 十大内容</span></footer>
     </div>
   </div>
   <dialog id="detail-dialog" class="drawer" aria-labelledby="dialog-title"><div class="dialog-heading"><div><span class="eyebrow" id="dialog-kicker">DETAIL</span><h2 id="dialog-title"></h2></div><button class="icon-button" data-action="close-dialog" aria-label="关闭"></button></div><div id="dialog-content"></div></dialog>
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"><form id="confirm-form"><span class="confirm-icon">!</span><h2 id="confirm-title"></h2><p id="confirm-description"></p><div class="form-actions"><button class="btn" type="button" data-action="cancel-confirm">取消</button><button class="btn primary" type="submit" id="confirm-submit">确认</button></div></form></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
-  <div id="boot-state" class="boot-state"><span class="spinner"></span><p>正在进入管理工作台…</p></div>
+  <div id="boot-state" class="boot-state"><span class="spinner"></span><p>正在进入管理端…</p></div>
 </body>
 </html>

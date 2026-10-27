@@ -78,7 +78,7 @@ public class DataSeeder implements ApplicationRunner {
         u.setRole(role);
         u.setAvatar(avatar);
         u.setColor(color);
-        u.setPasswordHash(passwordEncoder.encode(id)); // 默认密码与账号相同
+        u.setPasswordHash(passwordEncoder.encode(id)); // 仅演示种子保留此密码；登录请使用姓名，正式建号自动生成强密码
         return u;
     }
 

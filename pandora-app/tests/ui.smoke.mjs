@@ -1,79 +1,92 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
-const require=createRequire(import.meta.url);
-const { chromium }=require(path.join(process.env.PANDORA_RUNTIME_MODULES || 'C:/Users/32079/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules','playwright'));
-const output=path.resolve('deliverables/verification'); await mkdir(output,{recursive:true});
-const browser=await chromium.launch({executablePath:process.env.PANDORA_BROWSER || 'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
-const context=await browser.newContext({viewport:{width:390,height:844},timezoneId:'Asia/Shanghai',locale:'zh-CN',isMobile:true,hasTouch:true});
-const page=await context.newPage(), errors=[];
-page.on('pageerror',e=>errors.push(e.message)); page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-const url=process.env.PANDORA_URL || 'http://127.0.0.1:5174';
-const clickAction=async(action,id)=>{ if(action==='console') await page.locator('[data-route="mine"]').click(); await page.locator(`[data-action="${action}"]${id ? `[data-id="${id}"]`:''}`).first().click(); };
-const switchTo=async id=>{ await clickAction('switch'); await page.locator(`[data-user="${id}"]`).click(); };
-const go=async route=>page.locator(`[data-route="${route}"]`).click();
-const readDb=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('pandora.workspace.v2')));
-const checks=[];
+import { USERS, userById, seedDatabase, visibleTasks, visibleLogs, visibleRequests, allowedAssignees,
+  requestTaskChange, reviewTaskChange, updateTaskDetail, completeTask } from '../src/domain.js';
+
+const require = createRequire(import.meta.url);
+const { chromium } = require(path.join(process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'), 'playwright'));
+const browser = await chromium.launch({channel:process.env.PANDORA_BROWSER_CHANNEL || 'msedge',headless:true});
+const context = await browser.newContext({viewport:{width:390,height:844},timezoneId:'Asia/Shanghai',locale:'zh-CN',isMobile:true,hasTouch:true});
+const page = await context.newPage(), errors = [], checks = [];
+page.on('pageerror',e=>errors.push(e.message));
+const now = new Date('2026-10-23T10:00:00+08:00'), db = seedDatabase(now);
+await page.clock.install({time:now});
+let actor = userById('lin');
+await page.route('**/api/**',async route=>{
+  const req=route.request(), endpoint=new URL(req.url()).pathname.slice(4), body=req.postData()?req.postDataJSON():{};
+  const send=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
+  try {
+    if(endpoint==='/auth/login') {actor=USERS.find(u=>u.name===body.identifier);assert.ok(actor);return send({token:'test-'+actor.id,user:actor});}
+    if(endpoint==='/workspace') return send({user:actor,db:{...db,tasks:visibleTasks(db,actor),logs:visibleLogs(db,actor),members:USERS,
+      requests:visibleRequests(db,actor),allowedAssignees:allowedAssignees(actor)}});
+    if(endpoint==='/tasks/requests') return send(requestTaskChange(db,actor,body.kind,body.values,body.taskId,now));
+    if(endpoint.endsWith('/review')) return send(reviewTaskChange(db,actor,endpoint.split('/')[3],body.approve,body.reason,now));
+    if(endpoint.endsWith('/progress')) return send(updateTaskDetail(db,actor,endpoint.split('/')[2],body.text,now));
+    if(endpoint.endsWith('/complete')) return send(completeTask(db,actor,endpoint.split('/')[2],now));
+    return send({error:'Unexpected test endpoint: '+endpoint},404);
+  } catch(error) {return send({error:error.message},400);}
+});
+const go=route=>page.locator(`.nav [data-route="${route}"]`).click();
+const action=(name,id)=>page.locator(`[data-action="${name}"]${id?`[data-id="${id}"]`:''}`).first().click();
+async function login(id) {
+  if(await page.locator('.nav').count()) {await go('mine');await action('confirm-logout');await action('logout');}
+  await page.locator('[name="identifier"]').fill(userById(id).name);
+  await page.locator('[name="password"]').fill('fixture-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await page.locator('.dashboard-page').waitFor();
+}
+async function list() {await go('calendar');await page.locator('[data-task-view="list"]').click();}
+async function requests() {await list();await page.locator('.task-requests > summary').click();}
+async function modalClosed() {await page.locator('#modal').waitFor({state:'hidden'});}
 try {
-  await page.goto(url); await page.locator('h1').waitFor();
-  assert.match(await page.locator('h1').innerText(),/林予安/);
-  await page.screenshot({path:path.join(output,'01-home.png'),fullPage:true});
-  await go('tasks'); await page.screenshot({path:path.join(output,'02-tasks.png'),fullPage:true});
-  await switchTo('manager'); await clickAction('console'); await clickAction('new-task');
-  await page.locator('[name="title"]').fill('安卓验收任务');
-  await page.locator('[name="owners"][value="lin"]').check(); await page.locator('[name="owners"][value="zhou"]').check();
-  await page.locator('[name="dueAt"]').fill('2026-10-20T16:45'); await page.locator('[name="detail"]').fill('检查多人、审核、直接完成流程');
-  await page.getByRole('button',{name:'提交审核',exact:true}).click();
-  let data=await readDb(), req=data.requests.find(r=>r.after?.title==='安卓验收任务'), taskId=req.taskId;
-  assert.equal(req.status,'pending'); assert.equal(data.tasks.some(t=>t.id===taskId),false);
-  await switchTo('founder'); await clickAction('console'); await clickAction('request',req.id);
-  await page.screenshot({path:path.join(output,'03-review.png'),fullPage:true});
-  await page.getByRole('button',{name:'审核通过',exact:true}).click();
-  data=await readDb(); assert.equal(data.tasks.find(t=>t.id===taskId).status,'todo'); checks.push('创建申请独立审核后生效');
-  await switchTo('lin'); await go('tasks'); await clickAction('task',taskId);
-  await page.locator('[name="note"]').fill('任务详情中记录进展，不填百分比'); await page.getByRole('button',{name:'保存进展',exact:true}).click();
-  await clickAction('task',taskId); await page.screenshot({path:path.join(output,'04-task-detail.png'),fullPage:true});
-  await clickAction('complete',taskId); await clickAction('confirm-complete',taskId);
-  data=await readDb(); assert.equal(data.tasks.find(t=>t.id===taskId).status,'done'); assert.equal(data.requests.length,1); checks.push('文字进展与直接完成');
-  await switchTo('zhou'); await go('tasks'); assert.equal(await page.locator(`[data-action="task"][data-id="${taskId}"]`).count(),1); checks.push('两位负责人均可见同一任务');
-  await switchTo('lin'); await go('logs'); await clickAction('new-log'); await page.locator('[name="content"]').fill('第一版综合日志');
-  await page.getByRole('button',{name:'保存日志',exact:true}).click();
-  await clickAction('new-log'); await page.locator('[name="content"]').fill('第二版综合日志，保留旧内容'); await page.getByRole('button',{name:'保存日志',exact:true}).click();
-  data=await readDb(); const log=data.logs.find(l=>l.author==='lin' && l.content==='第二版综合日志，保留旧内容');
-  assert.equal(log.versions.at(-1).content,'第一版综合日志'); await clickAction('log',log.id);
-  await page.locator('.version-item').first().locator('summary').click();
-  assert.match(await page.locator('#modal').innerText(),/第一版综合日志/);
-  await page.screenshot({path:path.join(output,'05-log-versions.png'),fullPage:true}); await page.getByRole('button',{name:'关闭',exact:true}).click(); checks.push('当天综合日志与修改前版本留档');
-  await page.locator('[data-log-range="archive"]').click();
-  const past=data.logs.find(l=>l.author==='lin' && l.date!==log.date); await clickAction('log',past.id);
-  assert.equal(await page.locator('#modal [data-action="edit-log"]').count(),0); await page.getByRole('button',{name:'关闭',exact:true}).click(); checks.push('历史日志仅可读');
-  await go('calendar'); await page.screenshot({path:path.join(output,'06-month.png'),fullPage:true});
-  await page.locator('[data-mode="week"]').click(); await page.screenshot({path:path.join(output,'07-week.png'),fullPage:true});
-  await page.locator('[data-mode="day"]').click(); await page.screenshot({path:path.join(output,'08-day.png'),fullPage:true}); checks.push('月周日视图可切换');
-  await switchTo('manager'); await go('tasks'); await clickAction('task',taskId); await clickAction('edit-task',taskId);
-  await page.locator('[name="title"]').fill('安卓验收任务修改后'); await page.getByRole('button',{name:'提交审核',exact:true}).click();
-  data=await readDb(); assert.equal(data.tasks.find(t=>t.id===taskId).title,'安卓验收任务'); req=data.requests.find(r=>r.kind==='edit');
-  await switchTo('founder'); await clickAction('console'); await clickAction('request',req.id); await page.getByRole('button',{name:'审核通过',exact:true}).click();
-  data=await readDb(); assert.equal(data.tasks.find(t=>t.id===taskId).title,'安卓验收任务修改后'); assert.equal(data.tasks.find(t=>t.id===taskId).status,'done'); checks.push('编辑审核前不生效，通过后保留完成状态');
-  await switchTo('manager'); await go('tasks'); await clickAction('task',taskId); await clickAction('delete-task',taskId); await clickAction('confirm-delete',taskId);
-  data=await readDb(); req=data.requests.find(r=>r.kind==='delete'); assert.equal(data.tasks.find(t=>t.id===taskId).deleted,false);
-  await switchTo('founder'); await clickAction('console'); await clickAction('request',req.id); await page.getByRole('button',{name:'审核通过',exact:true}).click();
-  data=await readDb(); assert.equal(data.tasks.find(t=>t.id===taskId).deleted,true); checks.push('删除审核与归档保留');
-  await page.reload(); assert.equal((await readDb()).tasks.find(t=>t.id===taskId).deleted,true); checks.push('刷新后记录保留');
-  await switchTo('admin'); await clickAction('console'); await clickAction('new-account');
-  await page.locator('[name="name"]').fill('验收同事'); await page.locator('[name="login"]').fill('qa_demo'); await page.getByRole('button',{name:'创建',exact:true}).click();
-  await page.reload(); await switchTo('qa_demo'); assert.match(await page.locator('h1').innerText(),/验收同事/); checks.push('本地账号创建与重载');
-  await switchTo('lin');
-  for(const width of [360,375,390,412,1280]) {
+  await page.goto(process.env.PANDORA_URL || 'http://127.0.0.1:5173');
+  await login('lin');
+  assert.equal(await page.locator('.dashboard-head button').count(),0);
+  await go('calendar'); await action('new-task');
+  assert.equal(await page.locator('[name="owners"][type="checkbox"]').count(),0);
+  assert.equal(await page.locator('[name="owners"]').inputValue(),'lin');
+  await page.locator('[name="title"]').fill('员工自行创建任务');
+  await page.locator('[name="detail"]').fill('独立审核、记录进展与直接完成');
+  await page.getByRole('button',{name:'提交创建申请',exact:true}).click();await modalClosed();
+  const req=db.requests.find(r=>r.after?.title==='员工自行创建任务'), taskId=req.taskId;
+  assert.equal(db.tasks.some(t=>t.id===taskId),false);
+  await page.locator('[data-task-view="list"]').click();await page.locator('.task-requests > summary').click();
+  await action('request',req.id);assert.equal(await page.locator('[data-form="review"]').count(),0);
+  await page.locator('[data-close]').click();
+  checks.push('员工从视图提交本人任务申请，待审核任务未生效且不能自审');
+  await login('founder');await requests();await action('request',req.id);
+  await page.getByRole('button',{name:'审核通过',exact:true}).click();await modalClosed();
+  assert.equal(db.tasks.find(t=>t.id===taskId).status,'todo');
+  await login('lin');await list();await action('task',taskId);
+  assert.equal(await page.locator('[data-action="edit-task"]').count(),0);
+  await page.locator('[name="note"]').fill('初稿已完成');
+  await page.getByRole('button',{name:'保存进展',exact:true}).click();await modalClosed();
+  await action('task',taskId);await action('complete',taskId);await action('confirm-complete',taskId);await modalClosed();
+  assert.equal(db.tasks.find(t=>t.id===taskId).status,'done');assert.equal(db.requests.length,1);
+  checks.push('管理员在 app 审核；本人可记录进展、直接完成，无管理权限按钮');
+  await login('manager');await list();await action('task',taskId);await action('edit-task',taskId);
+  await page.locator('[name="title"]').fill('修改后的员工任务');
+  await page.getByRole('button',{name:'提交修改申请',exact:true}).click();await modalClosed();
+  assert.equal(db.tasks.find(t=>t.id===taskId).title,'员工自行创建任务');
+  const edit=db.requests.find(r=>r.kind==='edit');
+  await login('founder');await requests();await action('request',edit.id);
+  await page.getByRole('button',{name:'审核通过',exact:true}).click();await modalClosed();
+  assert.equal(db.tasks.find(t=>t.id===taskId).title,'修改后的员工任务');assert.equal(db.tasks.find(t=>t.id===taskId).status,'done');
+  checks.push('管理范围内编辑申请独立审核后生效，完成状态保留');
+  await login('manager');await list();await action('task',taskId);await action('delete-task',taskId);await action('confirm-delete',taskId);await modalClosed();
+  const deletion=db.requests.find(r=>r.kind==='delete');assert.equal(db.tasks.find(t=>t.id===taskId).deleted,false);
+  await login('founder');await requests();await action('request',deletion.id);
+  await page.getByRole('button',{name:'审核通过',exact:true}).click();await modalClosed();
+  assert.equal(db.tasks.find(t=>t.id===taskId).deleted,true);
+  checks.push('删除申请审核后归档');
+  for(const width of [360,390,412,1280]) {
     await page.setViewportSize({width,height:844});
-    for(const route of ['dashboard','tasks','logs','calendar','mine']) {
-      await go(route); const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
-      assert.equal(overflow,false,`${width}px ${route} overflow`);
+    for(const route of ['dashboard','calendar','logs','mine']) {
+      await go(route);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${width}px ${route}`);
     }
   }
-  checks.push('360/375/390/412/1280 像素各页无横向溢出');
-  assert.deepEqual(errors,[]); checks.push('浏览器无运行错误');
-  await writeFile(path.join(output,'ui-results.json'),JSON.stringify({passed:true,environment:'Chrome mobile browser; not Android device',checks,errors},null,2));
+  assert.deepEqual(errors,[]);checks.push('四个路由无横向页面溢出且无运行错误');
   console.log(JSON.stringify({passed:true,checks},null,2));
-} finally { await browser.close(); }
+} finally {await browser.close();}

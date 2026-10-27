@@ -12,7 +12,7 @@ const context = await browser.newContext({ viewport: { width: 390, height: 844 }
 const page = await context.newPage(), errors = [];
 page.on('pageerror', e => errors.push(e.message));
 await page.clock.install({ time: new Date('2026-10-23T10:00:00+08:00') });
-const members = [{ id: 'manager', name: '沈知夏', role: 'DEPT_MANAGER', roleName: '部门负责人', department: '产品设计部', avatar: '夏', color: 'green' },
+const members = [{ id: 'manager', name: '沈知夏', phone:'13800138000',gender:'女',idNumber:'11010119900101001X', role: 'DEPT_MANAGER', roleName: '部门负责人', department: '产品设计部', avatar: '夏', color: 'green' },
   { id: 'lin', name: '林予安', role: 'EMPLOYEE', roleName: '员工', department: '产品设计部' }];
 const makeLog = (id, date, author = 'manager') => ({ id, date, author, title: `${date} 工作日志`, content: `${date} 完成客户需求整理`, versions: [], updatedAt: `${date}T18:00:00`, taskId: '' });
 const logs = [makeLog('today', '2026-10-23'), makeLog('before', '2026-10-21'), makeLog('month', '2026-10-05'), makeLog('other', '2026-10-23', 'lin')];
@@ -28,6 +28,11 @@ await page.route('**/api/**', async route => {
   const respond = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   if (url.pathname.endsWith('/auth/login')) return respond({ token: 'personal-ui-token', user: members[0] });
   if (url.pathname.endsWith('/workspace')) return respond({ user: members[0], db });
+  if (url.pathname.endsWith('/auth/profile/avatar')) {
+    members[0].avatarData = request.postDataJSON().avatarData;
+    assert.match(members[0].avatarData, /^data:image\/jpeg;base64,/);
+    return respond(members[0]);
+  }
   if (url.pathname.endsWith('/logs/history')) {
     historyRequests++;
     if (historyGate) await historyGate;
@@ -56,7 +61,7 @@ const range = async (value, count) => {
 };
 try {
   await page.goto(process.env.PANDORA_URL || 'http://127.0.0.1:5173');
-  await page.locator('[name="username"]').fill('manager');
+  await page.locator('[name="identifier"]').fill('沈知夏');
   await page.locator('[name="password"]').fill('manager');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await go('logs');
@@ -96,6 +101,15 @@ try {
   assert.equal(await page.locator('[name="content"]').inputValue(), logs[0].content);
   await close();
   checks.push('本月统计准确、无重复导航、最近三天可直接补写及编辑');
+  await page.locator('.settings-list [data-action="profile-details"]').click();
+  assert.match(await page.locator('#modal').innerText(), /性别[\s\S]*女[\s\S]*身份证号[\s\S]*11010119900101001X[\s\S]*手机号[\s\S]*13800138000/);
+  await close();
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=', 'base64');
+  await page.locator('#avatar-file').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:png});
+  await page.locator('.profile-avatar img').waitFor();
+  await page.reload(); await go('mine');
+  assert.match(await page.locator('.profile-avatar img').getAttribute('src'),/^data:image\/jpeg;base64,/);
+  checks.push('性别、身份证号、手机号可见；头像压缩上传并在刷新后保留');
   for (const action of ['profile-details','help','about']) {
     await page.locator(`.settings-list [data-action="${action}"]`).click();
     assert.equal(await page.locator('#modal').evaluate(el => el.open), true);
@@ -115,7 +129,7 @@ try {
   await page.locator('[data-form="login"]').waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('pandora.token')), null);
   checks.push('个人资料、帮助、版本可查看；密码确认、原密码错误和修改后退出通过');
-  await page.locator('[name="username"]').fill('manager'); await page.locator('[name="password"]').fill('manager');
+  await page.locator('[name="identifier"]').fill('沈知夏'); await page.locator('[name="password"]').fill('manager');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   for (const width of [360,390,412,1280]) {
     await page.setViewportSize({ width, height: 844 });

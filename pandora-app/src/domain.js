@@ -64,8 +64,8 @@ function taskValues(u, v) {
   return { title: cleaned(v.title, '任务名称', 80), owners, dueAt: v.dueAt, priority: v.priority, detail };
 }
 export function requestTaskChange(db, u, kind, values = {}, taskId = null, now = new Date()) {
-  requireValue(isManager(u), '当前身份不能提交任务变更');
   requireValue(['create', 'edit', 'delete'].includes(kind), '未知变更类型');
+  requireValue(kind === 'create' || isManager(u), '当前身份不能编辑或删除任务');
   const task = kind === 'create' ? null : db.tasks.find(t => t.id === taskId);
   if (kind !== 'create') {
     requireValue(canManageTask(u, task), '没有修改这项任务的权限');

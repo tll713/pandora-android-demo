@@ -86,6 +86,7 @@ dialog { width: min(600px, calc(100% - 28px)); max-height: min(750px, calc(100% 
 .log-author { padding-top: 18px; }
 .log-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-detail-actions { padding-bottom: 28px; }
+.log-linked-task { margin-top: 14px; }
 .task-id { overflow-wrap: anywhere; }
 .task-card-top { gap: 8px; }
 .task-card-top .priority { flex-shrink: 0; }
@@ -198,8 +199,9 @@ button:disabled { cursor: wait; opacity: .65; }
 .dashboard-tile > header > div { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
 .dashboard-tile > header span { color: var(--green-2); font-size: 10px; font-variant-numeric: tabular-nums; }
 .dashboard-tile h2 { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.tile-open { width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 50%; background: #f0f4ef; color: var(--green); font-size: 17px; }
-.tile-open:hover { background: var(--mint); }
+.tile-open { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #eef3ee; color: var(--green); transition: .18s ease; }
+.tile-open:hover { background: var(--mint); transform: translateX(2px); }
+.tile-arrow { display: block; }
 .tile-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 2px 14px 8px; }
 .tile-row { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 9px; padding: 6px 0; border: 0; border-bottom: 1px solid #eef1ed; background: transparent; color: inherit; text-align: left; }
 .tile-row:last-child { border-bottom: 0; }
@@ -229,6 +231,28 @@ button:disabled { cursor: wait; opacity: .65; }
 .calendar-panel--day .day-items { max-height: min(60dvh, 520px); overflow-y: auto; }
 .calendar-panel--day .day-task { white-space: normal; }
 .task-list-filters { margin-top: 0; }
+.task-list-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 340px) auto; align-items: center; gap: 12px; }
+.task-status-filters { min-width: 0; }
+.task-search { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.task-search .search-field { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--muted); }
+.task-search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; }
+.calendar-date-label { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.calendar-date-label input { width: 132px; min-width: 0; border: 0; background: transparent; color: var(--ink); font-size: 11px; }
+.profile-avatar-button { position: relative; flex: 0 0 auto; padding: 0; border: 0; border-radius: 18px; background: transparent; color: inherit; }
+.profile-avatar-button .avatar { overflow: hidden; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.profile-avatar-button > small { position: absolute; right: -5px; bottom: -5px; padding: 4px 6px; border: 2px solid var(--green); border-radius: 6px; background: white; color: var(--green); font-size: 9px; font-weight: 750; }
+.profile-identity > div:last-child > span:last-child { display: block; margin-top: 7px; color: #d7e6d5; font-size: 11px; }
+.calendar-date-label:focus-within, .task-search .search-field:focus-within { border-color: var(--green-2); }
+@media (max-width: 780px) {
+  .task-list-filters { grid-template-columns: 1fr auto; gap: 9px; }
+  .task-status-filters { grid-column: 1 / -1; }
+  .task-status-filters .segment { min-width: 64px; }
+  .task-search { grid-column: 1 / -1; grid-row: 2; }
+  .task-list-filters .filter-hint { grid-column: 1 / -1; padding: 0 4px; }
+  .calendar-date-label { flex: 1; justify-content: space-between; }
+  .calendar-date-label input { width: min(150px, 45vw); }
+}
 @media (max-width: 780px) {
   .page-wrap:has(.dashboard-page) { height: calc(100dvh - 156px); padding-top: 14px; padding-bottom: 8px; }
   .dashboard-head { margin-bottom: 11px; }
@@ -239,7 +263,7 @@ button:disabled { cursor: wait; opacity: .65; }
   .dashboard-tile > header > div { gap: 5px; }
   .dashboard-tile > header span { font-size: 9px; }
   .dashboard-tile h2 { font-size: 11px; }
-  .tile-open { width: 25px; height: 25px; flex-basis: 25px; }
+  .tile-open { width: 30px; height: 30px; flex-basis: 30px; }
   .tile-content { padding: 1px 9px 6px; }
   .tile-row { min-height: 35px; gap: 6px; }
   .tile-row-main b { font-size: 10px; }
@@ -310,10 +334,11 @@ button:disabled { cursor: wait; opacity: .65; }
 .day-summary:hover { background: #f4f8f2; }
 .calendar-marker-row { min-height: 8px; display: flex; align-items: center; justify-content: center; gap: 4px; }
 .calendar-dot { width: 7px; height: 7px; display: inline-block; flex: 0 0 7px; border-radius: 50%; background: var(--green-2); }
-.calendar-dot--high { background: #e46d68; }.calendar-dot--medium { background: #e3a34e; }.calendar-dot--low { background: #70a17a; }
+.calendar-dot--high { background: #e46d68; }.calendar-dot--medium { background: #e3a34e; }.calendar-dot--low { background: #70a17a; }.calendar-dot--log { background: #8c79a6; }
 .calendar-more { color: #68776d; font-size: 10px; font-weight: 750; }
 .calendar-count { color: #6b786f; font-size: 10px; font-variant-numeric: tabular-nums; }
 .calendar-count--empty { color: #c2c9c3; }
+.calendar-log-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; color: #7a6894; font-size: 9px; font-weight: 750; }
 .calendar-day-timeline { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 10px 30px rgba(45, 64, 51, .08); }
 .timeline-header { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 21px 23px 18px; border-bottom: 1px solid var(--line); background: #fbfcfa; }
 .timeline-header h2 { margin: 6px 0 0; font-size: 23px; }

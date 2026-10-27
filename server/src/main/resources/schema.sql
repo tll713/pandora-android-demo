@@ -1,9 +1,13 @@
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(30) PRIMARY KEY,
   name VARCHAR(30) NOT NULL,
+  phone VARCHAR(20),
+  gender VARCHAR(8),
+  id_number VARCHAR(18),
   department VARCHAR(40) NOT NULL,
   role ENUM('ADMIN','FOUNDER','DEPT_MANAGER','TEAM_LEAD','EMPLOYEE') NOT NULL,
   avatar VARCHAR(10),
+  avatar_data LONGTEXT,
   color VARCHAR(10),
   password_hash VARCHAR(100) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -102,7 +106,54 @@ CREATE TABLE IF NOT EXISTS pins (
   FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 
+CREATE TABLE IF NOT EXISTS highlights (
+  id VARCHAR(60) PRIMARY KEY,
+  kind VARCHAR(16) NOT NULL,
+  audience VARCHAR(30) NOT NULL DEFAULT '',
+  position INT NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  content TEXT NOT NULL,
+  task_id VARCHAR(60),
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  UNIQUE KEY uk_highlight_slot (kind, audience, position)
+);
+
 -- Upgrade existing installations without dropping business data.
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'phone') = 0,
+  'ALTER TABLE users ADD COLUMN phone VARCHAR(20)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'gender') = 0,
+  'ALTER TABLE users ADD COLUMN gender VARCHAR(8)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'id_number') = 0,
+  'ALTER TABLE users ADD COLUMN id_number VARCHAR(18)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'avatar_data') = 0,
+  'ALTER TABLE users ADD COLUMN avatar_data LONGTEXT', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'users' AND index_name = 'uk_users_phone') = 0,
+  'CREATE UNIQUE INDEX uk_users_phone ON users(phone)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
 
 SET @pandora_ddl = IF(
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'enabled') = 0,

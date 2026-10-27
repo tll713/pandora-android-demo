@@ -20,6 +20,7 @@ public class ApiController {
     private final TaskService taskService;
     private final LogService logService;
     private final AnnouncementService announcementService;
+    private final HighlightService highlightService;
     private final com.pandora.server.repository.UserRepository userRepository;
     private final com.pandora.server.repository.TaskRepository taskRepository;
     private final com.pandora.server.repository.TaskOwnerRepository taskOwnerRepository;
@@ -28,7 +29,7 @@ public class ApiController {
     private final com.pandora.server.repository.WorkLogRepository workLogRepository;
 
     public ApiController(AuthService authService, UserService userService, TaskService taskService,
-                         LogService logService, AnnouncementService announcementService,
+                         LogService logService, AnnouncementService announcementService, HighlightService highlightService,
                          com.pandora.server.repository.UserRepository userRepository,
                          com.pandora.server.repository.TaskRepository taskRepository,
                          com.pandora.server.repository.TaskOwnerRepository taskOwnerRepository,
@@ -40,6 +41,7 @@ public class ApiController {
         this.taskService = taskService;
         this.logService = logService;
         this.announcementService = announcementService;
+        this.highlightService = highlightService;
         this.userRepository = userRepository;
         this.taskRepository = taskRepository;
         this.taskOwnerRepository = taskOwnerRepository;
@@ -52,17 +54,16 @@ public class ApiController {
 
     @PostMapping("/auth/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
+        String identifier = body.get("identifier");
         String password = body.get("password");
-        if (username == null || password == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "请填写用户名和密码"));
+        if (identifier == null || password == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "请填写手机号或姓名及密码"));
         }
         try {
-            String token = authService.authenticate(username, password);
-            User user = userRepository.findById(username).orElseThrow();
+            AuthService.LoginResult result = authService.login(identifier, password);
             return ResponseEntity.ok(Map.of(
-                "token", token,
-                "user", userToMap(user)
+                "token", result.token(),
+                "user", profileToMap(result.user())
             ));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -73,7 +74,7 @@ public class ApiController {
     public ResponseEntity<?> me(@AuthenticationPrincipal UserDetails ud) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
-        return ResponseEntity.ok(userToMap(user));
+        return ResponseEntity.ok(profileToMap(user));
     }
 
     // ============ 工作区数据（App） ============
@@ -86,6 +87,18 @@ public class ApiController {
         try {
             userService.changePassword(user, body.get("currentPassword"), body.get("newPassword"));
             return ResponseEntity.ok(Map.of("message", "密码已修改，请重新登录"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/auth/profile/avatar")
+    public ResponseEntity<?> updateAvatar(@AuthenticationPrincipal UserDetails ud,
+                                          @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        try {
+            return ResponseEntity.ok(profileToMap(userService.updateAvatar(user, body.get("avatarData"))));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -110,12 +123,13 @@ public class ApiController {
         db.put("logs", logs.stream().map(this::logToMap).collect(Collectors.toList()));
         db.put("requests", requests.stream().map(this::requestToMap).collect(Collectors.toList()));
         db.put("announcements", announcements.stream().map(this::announcementToMap).collect(Collectors.toList()));
+        db.put("highlights", highlightService.visibleTo(user, tasks));
         db.put("pins", Map.of(user.getId(), pins));
         db.put("members", visibleUsers.stream().map(this::userToMap).collect(Collectors.toList()));
         db.put("allowedAssignees", allowedAssignees.stream().map(this::userToMap).collect(Collectors.toList()));
 
         return ResponseEntity.ok(Map.of(
-            "user", userToMap(user),
+            "user", profileToMap(user),
             "db", db
         ));
     }
@@ -237,7 +251,7 @@ public class ApiController {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "无权限"));
-        return ResponseEntity.ok(userRepository.findAll().stream().map(this::userToMap).collect(Collectors.toList()));
+        return ResponseEntity.ok(userRepository.findAll().stream().map(this::adminUserToMap).collect(Collectors.toList()));
     }
 
     @PostMapping("/admin/users")
@@ -246,8 +260,11 @@ public class ApiController {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         try {
-            User created = userService.createUser(user, body.get("name"), body.get("login"), body.get("department"), body.get("role"));
-            return ResponseEntity.ok(userToMap(created));
+            UserService.CreatedAccount created = userService.createUser(user, body.get("name"), body.get("phone"),
+                    body.get("gender"), body.get("idNumber"), body.get("department"), body.get("role"));
+            Map<String, Object> result = new HashMap<>(adminUserToMap(created.user()));
+            result.put("temporaryPassword", created.temporaryPassword());
+            return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -260,8 +277,9 @@ public class ApiController {
         if (actor.getRole() != User.Role.ADMIN) return ResponseEntity.status(403).body(Map.of("error", "只有管理员可以维护账号"));
         try {
             User updated = userService.updateUser(actor, id, (String) body.get("name"),
+                    (String) body.get("phone"), (String) body.get("gender"), (String) body.get("idNumber"),
                     (String) body.get("department"), (String) body.get("role"), Boolean.TRUE.equals(body.get("enabled")));
-            return ResponseEntity.ok(userToMap(updated));
+            return ResponseEntity.ok(adminUserToMap(updated));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -363,7 +381,6 @@ public class ApiController {
     private Map<String, Object> userToMap(User u) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", u.getId());
-        m.put("login", u.getId());
         m.put("enabled", u.isEnabled());
         m.put("name", u.getName());
         m.put("department", u.getDepartment());
@@ -378,6 +395,19 @@ public class ApiController {
         m.put("avatar", u.getAvatar());
         m.put("color", u.getColor());
         return m;
+    }
+
+    private Map<String, Object> profileToMap(User u) {
+        Map<String, Object> m = userToMap(u);
+        m.put("phone", u.getPhone());
+        m.put("gender", u.getGender());
+        m.put("idNumber", u.getIdNumber());
+        m.put("avatarData", u.getAvatarData());
+        return m;
+    }
+
+    private Map<String, Object> adminUserToMap(User u) {
+        return profileToMap(u);
     }
 
     private Map<String, Object> taskToMap(Task t) {

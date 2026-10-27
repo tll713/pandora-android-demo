@@ -1,51 +1,32 @@
-/* 潘多拉管理空间 · 无构建依赖，复用任务审核业务规则 */
+/* 潘多拉管理端 · 原生 HTML / CSS / JavaScript */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const paths = {
-    dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
-    tasks:'<rect x="5" y="4" width="15" height="17" rx="2"/><path d="M9 3v3m7-3v3M8 11l1 1 2-2m2 1h4m-9 6 1 1 2-2m2 1h4"/>',
-    reviews:'<path d="m12 3 8 3v6c0 4-3.5 7-8 9-4.5-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/>',
+    highlights:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17h7m-3.5-3.5v7"/>',
     users:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m1-16a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 5v1"/>',
-    logs:'<path d="M5 3h14v18H5zM9 7h6m-6 5h6m-6 5h4"/>',
     announcements:'<path d="m4 10 15-6v15L4 14v-4Zm1 4 2 7h4l-2-5m10-6h2v4h-2"/>',
     plus:'<path d="M12 5v14M5 12h14"/>', search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
     refresh:'<path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5"/>',
-    close:'<path d="m6 6 12 12M6 18 18 6"/>', arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',
+    close:'<path d="m6 6 12 12M6 18 18 6"/>',
     logout:'<path d="M10 3H5v18h5m-1-9h12m-5-5 5 5-5 5"/>',
-    menu:'<path d="M4 6h16M4 12h16M4 18h16"/>', clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    check:'<path d="m5 12 4 4L19 6"/>', info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>',
-    chevron:'<path d="m9 6 6 6-6 6"/>', leaf:'<path d="M5 19C-1 5 14 3 21 3c0 11-5 20-16 16Zm0 0L16 8"/>',
-    pin:'<path d="m8 3 8 0-1 6 4 4v2H5v-2l4-4-1-6Zm4 12v7"/>'
+    menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+    info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/>'
   };
   const icon = name => '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">'+(paths[name] || paths.info)+'</svg>';
   const roles = {ADMIN:'管理员',FOUNDER:'创始人',DEPT_MANAGER:'部门负责人',TEAM_LEAD:'团队长',EMPLOYEE:'员工'};
-  const statuses = {todo:'待开始',doing:'进行中',done:'已完成'};
-  const priorities = {high:'高优先级',medium:'中优先级',low:'低优先级'};
-  const kinds = {create:'创建任务',edit:'编辑任务',delete:'删除任务'};
-  const reviewStatuses = {pending:'待审核',approved:'已通过',rejected:'已驳回'};
   const pages = {
-    dashboard:['工作台','OVERVIEW','团队进展与待办事项，一目了然'],
-    tasks:['任务管理','TASK MANAGEMENT','明确目标与分工，跟进每一项任务'],
-    reviews:['审核中心','REVIEW CENTER','审慎处理每一次变更，让协作有据可循'],
-    users:['组织与账号','TEAM & MEMBERS','管理团队成员，明确角色与访问权限'],
-    logs:['工作日志','WORK JOURNAL','汇聚工作记录，看见团队的每一份进展'],
-    announcements:['公司公告','ANNOUNCEMENTS','及时传递信息，连接团队共识']
+    users:['组织与账号','ORGANIZATION & ACCOUNTS','管理公司成员、部门与账号'],
+    announcements:['公司公告','COMPANY ANNOUNCEMENTS','发布并维护公司通知'],
+    highlights:['十大内容','TOP TEN HIGHLIGHTS','录入与维护 App 首页的公司事项、派发任务和个人事项']
   };
+  const highlightKinds={company:'公司十大重要事项',dispatch:'公司十大派发任务',personal:'个人十大重要事项'};
   const tokenKey = 'pandora.admin.token';
-  const state = {user:null,page:'dashboard',data:null,filters:{},pages:{},reviewTab:'pending',loading:false,error:'',busy:false,session:0,load:0};
+  const state = {user:null,page:'users',data:null,filters:{},pages:{},loading:false,error:'',busy:false,session:0,load:0};
   let toastTimer, dialogContext=null, confirmCallback=null;
   const tag = (text,color='') => '<span class="tag '+color+'">'+esc(text)+'</span>';
-  const statusTag = status => tag(statuses[status] || status,({todo:'amber',doing:'blue',done:'green'})[status]);
-  const priorityTag = priority => tag(priorities[priority] || priority,({high:'red',medium:'amber',low:'green'})[priority]);
-  const reviewTag = status => tag(reviewStatuses[status] || status,({pending:'amber',approved:'green',rejected:'red'})[status]);
-  const fmt = value => value ? String(value).replace('T',' ').slice(0,16) : '—';
-  const dateOnly = value => value ? String(value).slice(0,10) : '—';
   const member = id => state.data?.users.find(u=>u.id===id);
-  const memberName = id => member(id)?.name || id || '—';
-  const ownerNames = task => (task.ownerNames || (task.owners || []).map(memberName)).join('、') || '—';
-  const isOverdue = task => task.status!=='done' && new Date(task.dueAt).getTime()<Date.now();
   const action = (name,id,label,cls='row-link') => '<button type="button" class="'+cls+'" data-action="'+name+'" data-id="'+esc(id)+'">'+label+'</button>';
   function toast(message,error=false) {
     clearTimeout(toastTimer);
@@ -85,7 +66,7 @@
     $('refresh-btn').innerHTML=icon('refresh')+'刷新';
     $('today-label').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(new Date());
     $('login-view').hidden=true; $('app-view').hidden=false; $('boot-state').hidden=true;
-    navigate(location.hash.slice(1)||'dashboard',false); await reload();
+    navigate(pages[location.hash.slice(1)]?location.hash.slice(1):'users',true); await reload();
   }
   async function reload() {
     if(!state.user) return;
@@ -93,11 +74,11 @@
     state.loading=true; state.error=''; render();
     $('refresh-btn').disabled=true;
     try {
-      const [users,tasks,requests,logs,announcements]=await Promise.all([
-        api('/admin/users'),api('/admin/tasks'),api('/admin/requests'),api('/admin/logs'),api('/announcements')
+      const [users,announcements,highlights,tasks]=await Promise.all([
+        api('/admin/users'),api('/announcements'),api('/admin/highlights'),api('/admin/tasks')
       ]);
       if(session!==state.session || load!==state.load) return;
-      state.data={users,tasks,requests,logs,announcements};
+      state.data={users,announcements,highlights,tasks};
       $('refresh-time').textContent='更新于 '+new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
     } catch(error) { if(session===state.session && load===state.load) state.error=error.message; }
     finally {
@@ -105,7 +86,7 @@
     }
   }
   function navigate(page,updateHash=true) {
-    if(!pages[page]) page='dashboard';
+    if(!pages[page]) page='users';
     state.page=page;
     if(updateHash && location.hash!=='#'+page) history.pushState(null,'','#'+page);
     $('app-view').classList.remove('menu-open'); render();
@@ -113,10 +94,9 @@
   window.addEventListener('hashchange',()=>{if(state.user) navigate(location.hash.slice(1),false);});
   window.addEventListener('popstate',()=>{if(state.user) navigate(location.hash.slice(1),false);});
   function nav() {
-    $('navigation').innerHTML=Object.entries(pages).map(([key,value])=>{
-      const count=key==='reviews' ? state.data?.requests.filter(r=>r.status==='pending').length : 0;
-      return '<a class="nav-item '+(state.page===key?'active':'')+'" href="#'+key+'" '+(state.page===key?'aria-current="page"':'')+'>'+icon(key)+value[0]+(count?'<span class="nav-count">'+count+'</span>':'')+'</a>';
-    }).join('');
+    $('navigation').innerHTML=Object.entries(pages).map(([key,value])=>
+      '<a class="nav-item '+(state.page===key?'active':'')+'" href="#'+key+'" '+(state.page===key?'aria-current="page"':'')+'>'+icon(key)+value[0]+'</a>'
+    ).join('');
   }
   function render() {
     if(!state.user) return;
@@ -124,46 +104,18 @@
     const meta=pages[state.page];
     $('breadcrumb-title').textContent=meta[0]; $('page-title').textContent=meta[0]; $('page-kicker').textContent=meta[1]; $('page-description').textContent=meta[2];
     const primary=$('primary-action');
-    const primaryMap={dashboard:['new-task','创建任务'],tasks:['new-task','创建任务'],users:['new-user','添加成员'],announcements:['new-announcement','发布公告']};
+    const primaryMap={users:['new-user','添加成员'],announcements:['new-announcement','发布公告'],highlights:['new-highlight','录入十大内容']};
     const next=primaryMap[state.page];
     primary.hidden=!next || (state.page==='users' && state.user.role!=='ADMIN');
     primary.disabled=state.loading || !!state.error || !state.data;
     if(next) {primary.dataset.action=next[0];primary.innerHTML=icon('plus')+next[1];}
-    if(state.loading) {$('page-content').innerHTML='<div class="loading-state"><span class="spinner"></span>正在加载团队数据…</div>';return;}
+    if(state.loading) {$('page-content').innerHTML='<div class="loading-state"><span class="spinner"></span>正在加载管理数据…</div>';return;}
     if(state.error) {$('page-content').innerHTML='<section class="panel">'+empty('数据加载失败',state.error,'refresh','重新加载')+'</section>';return;}
     if(!state.data) return;
-    $('page-content').innerHTML=({dashboard:dashboard,tasks:tasksPage,reviews:reviewsPage,users:usersPage,logs:logsPage,announcements:announcementsPage})[state.page]();
+    $('page-content').innerHTML=({users:usersPage,announcements:announcementsPage,highlights:highlightsPage})[state.page]();
   }
   function empty(title='暂无匹配结果',description='试试调整筛选条件，或稍后再来查看。',button='',label='') {
     return '<div class="empty-state"><div class="empty-icon">'+icon(state.page)+'</div><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p>'+(button?action(button,'',esc(label),'btn'):'')+'</div>';
-  }
-  function miniTask(t) {
-    return '<div class="mini-row"><span class="priority-dot '+esc(t.priority)+'"></span><div class="mini-content">'+action('task-detail',t.id,esc(t.title),'mini-title row-link')+'<div class="mini-meta">'+esc(ownerNames(t))+' · 截止 '+esc(fmt(t.dueAt))+'</div></div>'+ (isOverdue(t)?tag('已逾期','red'):statusTag(t.status))+'</div>';
-  }
-  function dashboard() {
-    const {tasks,requests,logs,users,announcements}=state.data;
-    const done=tasks.filter(t=>t.status==='done').length, doing=tasks.filter(t=>t.status==='doing').length, todo=tasks.length-done-doing;
-    const pending=requests.filter(r=>r.status==='pending'), overdue=tasks.filter(isOverdue);
-    const completion=tasks.length?Math.round(done/tasks.length*100):0;
-    const dueSoon=tasks.filter(t=>t.status!=='done').sort((a,b)=>a.dueAt.localeCompare(b.dueAt)).slice(0,4);
-    const cards=[
-      ['团队任务',tasks.length,'项','tasks',done+' 项已完成 · 完成率 '+completion+'%','all'],
-      ['待审核申请',pending.length,'项','reviews',pending.filter(r=>r.proposer!==state.user.id).length+' 项可由你处理','pending'],
-      ['逾期任务',overdue.length,'项','clock','关注截止时间，及时协调进度','overdue'],
-      ['工作日志',logs.length,'篇','logs',users.filter(u=>u.enabled!==false).length+' 位在职成员 · 持续积累成果','all']
-    ];
-    const hour=new Date().getHours(), greeting=hour<12?'上午好':hour<18?'下午好':'晚上好';
-    const activities=[
-      ...requests.map(r=>({at:r.reviewedAt||r.createdAt,title:(r.reviewedAt?(r.reviewerName||memberName(r.reviewer))+' '+(r.status==='approved'?'通过':'驳回')+'了申请':r.proposerName+' 提交了'+(kinds[r.kind]||'变更')),meta:r.taskTitle,action:'request-detail',id:r.id,icon:'reviews'})),
-      ...logs.map(l=>({at:l.updatedAt||l.createdAt,title:(l.authorName||memberName(l.author))+' 更新了工作日志',meta:l.title,action:'log-detail',id:l.id,icon:'logs'})),
-      ...tasks.flatMap(t=>(t.history||[]).map(h=>({at:h.at,title:memberName(h.actor)+' · '+h.text,meta:t.title,action:'task-detail',id:t.id,icon:'tasks'})))
-    ].sort((a,b)=>(b.at||'').localeCompare(a.at||'')).slice(0,4);
-    return '<section class="welcome"><div class="welcome-art">'+icon('leaf')+'</div><div class="welcome-main"><h2>'+esc(greeting+'，'+state.user.name)+'</h2><p>'+ (pending.length?'有 '+pending.length+' 项申请等待审核，团队的进展需要你的关注。':'每一份清晰的安排，都让团队离目标更近一步。')+'</p></div>'+action('go-reviews','', '查看待办 '+icon('arrow'),'btn')+'</section>'+
-      '<div class="stats-grid">'+cards.map(([label,value,unit,ico,foot,filter],index)=>'<button class="stat-card '+(index===1||index===2?'attention':'')+'" data-action="stat" data-id="'+index+'" data-filter="'+filter+'"><div class="stat-top">'+label+'<span class="stat-icon">'+icon(ico)+'</span></div><div class="stat-value">'+value+'<small>'+unit+'</small></div><div class="stat-foot">'+foot+'</div></button>').join('')+'</div>'+
-      '<div class="dashboard-grid"><section class="panel"><div class="panel-head"><h2>任务运行概况</h2>'+action('go-tasks','', '全部任务 '+icon('arrow'),'btn text')+'</div><div class="panel-body"><div class="distribution"><div class="donut" style="--done:'+completion+'%;--doing:'+(tasks.length?(done+doing)/tasks.length*100:0)+'%"><div><strong>'+completion+'<small style="display:inline">%</small></strong><small>任务完成率</small></div></div><div class="legend">'+[[done,'已完成','#456c52'],[doing,'进行中','#a7bd85'],[todo,'待开始','#e7ecde']].map(([n,label,color])=>'<div class="legend-row"><i class="legend-dot" style="background:'+color+'"></i>'+label+'<b>'+n+'</b><small>'+ (tasks.length?Math.round(n/tasks.length*100):0)+'%</small></div>').join('')+'</div></div><div class="panel-divider"><span>把目标分解为行动，让每一步都有回响</span><strong>'+tasks.length+' 项团队任务</strong></div></div></section>'+
-      '<section class="panel"><div class="panel-head"><h2>近期需关注</h2>'+tag(overdue.length+' 项逾期',overdue.length?'red':'green')+'</div><div class="mini-list">'+(dueSoon.length?dueSoon.map(miniTask).join(''):empty('暂无待办任务','团队的任务都已处理完成。'))+'</div></section>'+
-      '<section class="panel"><div class="panel-head"><h2>团队动态</h2><span class="muted" style="font-size:10px">最近更新</span></div><div class="mini-list">'+(activities.length?activities.map(a=>'<div class="mini-row"><span class="activity-marker">'+icon(a.icon)+'</span><div class="mini-content">'+action(a.action,a.id,esc(a.title),'mini-title row-link')+'<div class="mini-meta">'+esc(a.meta)+'</div></div><span class="activity-time">'+esc(fmt(a.at).slice(5))+'</span></div>').join(''):empty('暂无团队动态','开始创建任务，记录团队进展。'))+'</div></section>'+
-      '<section class="panel"><div class="panel-head"><h2>公司公告</h2>'+action('go-announcements','','查看全部 '+icon('arrow'),'btn text')+'</div><div class="panel-body">'+(sortAnnouncements(announcements).slice(0,3).map(a=>'<div class="notice-mini"><button data-action="announcement-detail" data-id="'+esc(a.id)+'"><div class="notice-top"><strong>'+ (a.pinned?'⌑ ':'')+esc(a.title)+'</strong><small>'+esc(a.date)+'</small></div><p>'+esc(a.content)+'</p></button></div>').join('')||empty('暂无公告','团队通知将在这里展示。'))+'</div></section></div>';
   }
   function filters() {return state.filters[state.page] ||= {};}
   function selectFilter(name,label,options) {
@@ -186,41 +138,45 @@
     return '<section class="panel"><div class="table-top"><h2>'+title+'</h2><span>'+total+' 条记录</span></div>'+(rows.length?'<div class="table-wrap"><table><thead><tr>'+headers.map(h=>'<th scope="col">'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row+'</tr>').join('')+'</tbody></table></div>':empty())+footer+'</section>';
   }
   const cell = text => '<td>'+text+'</td>';
-  function tasksPage() {
-    const f=filters(),list=state.data.tasks.filter(t=>searchMatch(t.title+' '+t.detail+' '+ownerNames(t))
-      &&(!f.status||t.status===f.status)&&(!f.priority||t.priority===f.priority)&&(!f.owner||(t.owners||[]).includes(f.owner))&&(!f.overdue||isOverdue(t)))
-      .sort((a,b)=>isOverdue(b)-isOverdue(a)||a.dueAt.localeCompare(b.dueAt));
-    const p=paginated(list);
-    return toolbar(selectFilter('status','状态',Object.entries(statuses))+selectFilter('priority','优先级',Object.entries(priorities))+selectFilter('owner','负责人',state.data.users.map(u=>[u.id,u.name]))+selectFilter('overdue','截止情况',[['yes','仅逾期任务']]))+
-      table('团队任务',['任务名称','负责人','状态','优先级','截止时间','操作'],p.items.map(t=>
-        cell(action('task-detail',t.id,esc(t.title),'cell-title')+'<div class="cell-sub">创建人：'+esc(t.creatorName||memberName(t.creator))+'</div>')+
-        cell(esc(ownerNames(t)))+cell(statusTag(t.status))+cell(priorityTag(t.priority))+cell(esc(fmt(t.dueAt))+(isOverdue(t)?'<div class="cell-sub">'+tag('已逾期','red')+'</div>':''))+
-        cell('<div class="row-actions">'+action('task-detail',t.id,'详情')+action('edit-task',t.id,'编辑')+'</div>')),list.length,p.footer);
-  }
-  function reviewsPage() {
-    const f=filters(), list=state.data.requests.filter(r=>(state.reviewTab==='all'||r.status===state.reviewTab)&&searchMatch(r.taskTitle+' '+r.proposerName)&&(!f.kind||r.kind===f.kind)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-    const p=paginated(list);
-    return '<div class="review-tabs" role="group" aria-label="审核状态">'+[['pending','待审核'],['approved','已通过'],['rejected','已驳回'],['all','全部申请']].map(([key,label])=>'<button class="review-tab '+(state.reviewTab===key?'active':'')+'" data-action="review-tab" data-id="'+key+'" aria-pressed="'+(state.reviewTab===key)+'">'+label+'<small>'+state.data.requests.filter(r=>key==='all'||r.status===key).length+'</small></button>').join('')+'</div>'+
-      '<div class="section-note">'+icon('info')+'任务创建、编辑、删除经另一位管理员或创始人审核后生效；驳回需填写原因。</div>'+
-      toolbar(selectFilter('kind','变更类型',Object.entries(kinds)))+
-      table('变更申请',['任务 / 变更类型','申请人','申请时间','审核状态','操作'],p.items.map(r=>cell(action('request-detail',r.id,esc(r.taskTitle),'cell-title')+'<div class="cell-sub">'+esc(kinds[r.kind])+'</div>')+cell(esc(r.proposerName))+cell(esc(fmt(r.createdAt)))+cell(reviewTag(r.status))+cell(action('request-detail',r.id,r.status==='pending'?(r.proposer===state.user.id?'查看 · 本人申请':'查看并审核'):'查看记录'))),list.length,p.footer);
-  }
   function usersPage() {
     const f=filters(), departments=[...new Set(state.data.users.map(u=>u.department))].sort();
-    const list=state.data.users.filter(u=>searchMatch(u.name+' '+u.id+' '+u.department)&&(!f.department||u.department===f.department)&&(!f.role||u.role===f.role)&&(!f.enabled||(u.enabled!==false)===(f.enabled==='yes'))).sort((a,b)=>a.id.localeCompare(b.id));
+    const list=state.data.users.filter(u=>searchMatch(u.name+' '+(u.phone||'')+' '+u.department)&&(!f.department||u.department===f.department)&&(!f.role||u.role===f.role)&&(!f.enabled||(u.enabled!==false)===(f.enabled==='yes'))).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
     const p=paginated(list);
     return '<div class="section-note">'+icon('info')+(state.user.role==='ADMIN'?'管理员可维护普通成员账号；管理员与创始人账号受保护。':'你可以查看全体成员；账号创建、编辑和密码重置由管理员维护。')+'</div>'+
       toolbar(selectFilter('department','部门',departments.map(d=>[d,d]))+selectFilter('role','角色',Object.entries(roles))+selectFilter('enabled','账号状态',[['yes','正常'],['no','已停用']]))+
-      table('团队成员',['成员','登录账号','部门','角色','账号状态','操作'],p.items.map(u=>cell('<div class="member-cell"><span class="avatar">'+esc(u.name.slice(-1))+'</span><strong>'+esc(u.name)+'</strong></div>')+cell(esc(u.login||u.id))+cell(esc(u.department))+cell(tag(roles[u.role],u.role==='ADMIN'?'purple':u.role==='FOUNDER'?'amber':'green'))+cell(tag(u.enabled===false?'已停用':'正常',u.enabled===false?'':'green'))+cell(state.user.role==='ADMIN'&&!['ADMIN','FOUNDER'].includes(u.role)?'<div class="row-actions">'+action('edit-user',u.id,'编辑')+action('reset-password',u.id,'重置密码')+'</div>':'<span class="cell-sub">'+(['ADMIN','FOUNDER'].includes(u.role)?'受保护账号':'仅管理员可维护')+'</span>')),list.length,p.footer);
-  }
-  function logsPage() {
-    const f=filters();
-    const list=state.data.logs.filter(l=>searchMatch(l.title+' '+l.content+' '+l.authorName)&&(!f.author||l.author===f.author)&&(!f.from||l.date>=f.from)&&(!f.to||l.date<=f.to)).sort((a,b)=>b.date.localeCompare(a.date)||(b.updatedAt||'').localeCompare(a.updatedAt||''));
-    const p=paginated(list);
-    return toolbar(selectFilter('author','人员',state.data.users.map(u=>[u.id,u.name]))+'<label>开始日期<input name="from" data-filter="from" type="date" value="'+esc(f.from||'')+'"></label><label>结束日期<input name="to" data-filter="to" type="date" value="'+esc(f.to||'')+'"></label>')+
-      table('团队工作日志',['日志标题','作者','日志日期','内容摘要','操作'],p.items.map(l=>cell(action('log-detail',l.id,esc(l.title),'cell-title'))+cell(esc(l.authorName||memberName(l.author)))+cell(esc(l.date))+cell('<div class="cell-title" style="font-weight:400;color:var(--muted);max-width:230px">'+esc(l.content)+'</div>')+cell(action('log-detail',l.id,'查看全文'+(l.versions?.length?' · '+l.versions.length+' 个历史版本':'')))),list.length,p.footer);
+      table('团队成员',['成员','手机号','部门','角色','账号状态','操作'],p.items.map(u=>cell('<div class="member-cell"><span class="avatar">'+esc(u.name.slice(-1))+'</span><strong>'+esc(u.name)+'</strong></div>')+cell(esc(u.phone||'未填写，可用姓名登录'))+cell(esc(u.department))+cell(tag(roles[u.role],u.role==='ADMIN'?'purple':u.role==='FOUNDER'?'amber':'green'))+cell(tag(u.enabled===false?'已停用':'正常',u.enabled===false?'':'green'))+cell(state.user.role==='ADMIN'&&!['ADMIN','FOUNDER'].includes(u.role)?'<div class="row-actions">'+action('edit-user',u.id,'编辑')+action('reset-password',u.id,'重置密码')+'</div>':'<span class="cell-sub">'+(['ADMIN','FOUNDER'].includes(u.role)?'受保护账号':'仅管理员可维护')+'</span>')),list.length,p.footer);
   }
   function sortAnnouncements(items) {return [...items].sort((a,b)=>Number(!!b.pinned)-Number(!!a.pinned)||b.date.localeCompare(a.date)||a.id.localeCompare(b.id));}
+  function highlightsPage() {
+    const f=filters();
+    const list=state.data.highlights.filter(h=>(!f.kind||h.kind===f.kind)&&(!f.audience||h.audience===f.audience)&&(!f.enabled||h.enabled===(f.enabled==='yes'))&&searchMatch(h.title+' '+h.content+' '+(member(h.audience)?.name||'')))
+      .sort((a,b)=>a.kind.localeCompare(b.kind)||a.audience.localeCompare(b.audience)||a.position-b.position);
+    const p=paginated(list);
+    return '<div class="section-note">'+icon('info')+'每个公司板块最多 10 项；个人板块按成员分别维护 10 项。展示位置决定 App 首页顺序，停用后不展示。派发内容关联已审核生效的任务。</div>'+
+      '<div class="highlight-summary">'+Object.entries(highlightKinds).map(([kind,label])=>'<div><span>'+label+'</span><strong>'+state.data.highlights.filter(h=>h.kind===kind&&h.enabled).length+'</strong><small>'+(kind==='personal'?'已发布 · 各成员独立展示':'已发布 / 10')+'</small></div>').join('')+'</div>'+
+      toolbar(selectFilter('kind','板块',Object.entries(highlightKinds))+selectFilter('audience','展示对象',state.data.users.map(u=>[u.id,u.name]))+selectFilter('enabled','发布状态',[['yes','已发布'],['no','已停用']]))+
+      table('十大内容',['位置','内容','所属板块','展示对象','发布状态','操作'],p.items.map(h=>cell('<span class="highlight-position">'+String(h.position).padStart(2,'0')+'</span>')+cell('<button class="row-link highlight-title" data-action="highlight-detail" data-id="'+esc(h.id)+'">'+esc(h.title)+'</button><div class="cell-sub highlight-excerpt">'+esc(h.content)+'</div>')+cell(esc(highlightKinds[h.kind]))+cell(esc(h.kind==='personal'?member(h.audience)?.name||h.audience:h.kind==='dispatch'?'关联任务的可见成员':'全体成员'))+cell(tag(h.enabled?'已发布':'已停用',h.enabled?'green':''))+cell('<div class="row-actions">'+action('edit-highlight',h.id,'编辑')+action('toggle-highlight',h.id,h.enabled?'停用':'发布')+action('delete-highlight',h.id,'删除','row-link danger')+'</div>')),list.length,p.footer);
+  }
+  function highlightDetail(id) {
+    const h=state.data.highlights.find(h=>h.id===id); if(!h) return;
+    const task=state.data.tasks.find(t=>t.id===h.taskId);
+    openDialog(h.title,detailGrid([['板块',highlightKinds[h.kind]],['展示位置','第 '+h.position+' 项'],['展示对象',h.kind==='personal'?member(h.audience)?.name||h.audience:h.kind==='dispatch'?'关联任务的可见成员':'全体成员'],['状态',h.enabled?'已发布':'已停用']])+'<section class="detail-section"><div class="prose">'+esc(h.content)+'</div></section>'+(h.taskId?'<section class="detail-section"><h3>关联派发任务</h3><div class="prose">'+esc(task?task.title+'\n截止：'+task.dueAt.replace('T',' ')+'\n负责人：'+(task.ownerNames||task.owners?.map(id=>member(id)?.name||id)||[]).join('、'):'任务已归档，App 不再展示此派发项')+'</div></section>':'')+'<div class="detail-actions">'+action('edit-highlight',h.id,'编辑内容','btn primary')+'</div>','TOP TEN');
+  }
+  function highlightForm(id='') {
+    const h=state.data.highlights.find(h=>h.id===id);
+    const kind=h?.kind||filters().kind||'company', audience=h?.audience||filters().audience||'';
+    const occupied=state.data.highlights.filter(x=>x.kind===kind&&x.audience===(kind==='personal'?audience:'')).map(x=>x.position);
+    const position=h?.position||Array.from({length:10},(_,i)=>i+1).find(n=>!occupied.includes(n))||1;
+    openDialog(h?'编辑十大内容':'录入十大内容','<form id="highlight-form"><div class="form-grid"><label>所属板块<select name="kind">'+Object.entries(highlightKinds).map(([k,label])=>'<option value="'+k+'" '+(kind===k?'selected':'')+'>'+label+'</option>').join('')+'</select></label><label>展示位置<select name="position">'+Array.from({length:10},(_,i)=>'<option value="'+(i+1)+'" '+(position===i+1?'selected':'')+'>第 '+(i+1)+' 项</option>').join('')+'</select></label><label class="full" data-highlight-audience>个人展示对象<select name="audience"><option value="">请选择成员</option>'+state.data.users.filter(u=>u.enabled!==false||u.id===audience).map(u=>'<option value="'+esc(u.id)+'" '+(audience===u.id?'selected':'')+'>'+esc(u.name+' · '+u.department)+'</option>').join('')+'</select></label><label class="full" data-highlight-task>关联派发任务<select name="taskId"><option value="">请选择已生效任务</option>'+state.data.tasks.map(t=>'<option value="'+esc(t.id)+'" '+(h?.taskId===t.id?'selected':'')+'>'+esc(t.title)+'</option>').join('')+'</select><small class="form-hint">任务本身的创建、修改仍需在 App 提交申请并审核。</small></label><label class="full">展示标题<input name="title" required maxlength="120" value="'+esc(h?.title||'')+'" placeholder="输入首页展示标题"></label><label class="full">详细内容<textarea name="content" required maxlength="20000" rows="8" placeholder="输入具体事务、工作安排或注意事项">'+esc(h?.content||'')+'</textarea></label><label class="check-label full"><input type="checkbox" name="enabled" '+(h?.enabled!==false?'checked':'')+'>发布到 App 首页</label><p class="form-hint full">每个板块的展示位置不可重复；个人事项仅向所选成员展示。保存后 App 刷新即可看到最新内容。</p></div>'+formActions(h?'保存修改':'保存内容')+'</form>','TOP TEN EDIT',{type:'highlight-form',id});
+    updateHighlightFields();
+  }
+  function updateHighlightFields() {
+    const form=$('highlight-form'); if(!form) return;
+    const kind=form.elements.kind.value;
+    for(const [selector,name,visible] of [['[data-highlight-audience]','audience',kind==='personal'],['[data-highlight-task]','taskId',kind==='dispatch']]) {
+      form.querySelector(selector).hidden=!visible; form.elements[name].disabled=!visible; form.elements[name].required=visible;
+    }
+  }
   function announcementsPage() {
     const f=filters(), categories=[...new Set(state.data.announcements.map(a=>a.category))].sort();
     const list=sortAnnouncements(state.data.announcements.filter(a=>searchMatch(a.title+' '+a.content)&&(!f.category||a.category===f.category)));
@@ -237,76 +193,17 @@
   function inlineError() {return '<p class="inline-error" id="form-error" role="alert" hidden></p>';}
   function formActions(label) {return inlineError()+'<div class="form-actions"><button type="button" class="btn" data-action="close-dialog">取消</button><button type="submit" class="btn primary">'+label+'</button></div>';}
   function detailGrid(entries) {return '<dl class="detail-grid">'+entries.map(([k,v])=>'<div><dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd></div>').join('')+'</dl>';}
-  function section(title,body) {return '<section class="detail-section"><h3>'+esc(title)+'</h3>'+body+'</section>';}
-  function taskDetail(id) {
-    const t=state.data.tasks.find(t=>t.id===id);
-    if(!t) return toast('任务已不存在，请刷新数据',true);
-    const pending=state.data.requests.find(r=>r.taskId===id&&r.status==='pending');
-    const history=[...(t.history||[])].sort((a,b)=>b.at.localeCompare(a.at));
-    openDialog(t.title,'<div class="detail-tags">'+statusTag(t.status)+priorityTag(t.priority)+(isOverdue(t)?tag('已逾期','red'):'')+'</div>'+
-      detailGrid([['负责人',ownerNames(t)],['截止时间',fmt(t.dueAt)],['创建人',t.creatorName||memberName(t.creator)],['创建时间',fmt(t.createdAt)],['完成时间',fmt(t.completedAt)],['当前版本','第 '+t.revision+' 版']])+
-      (pending?'<div class="section-note">'+icon('reviews')+'此任务已有待审核变更 '+action('request-detail',pending.id,'查看申请')+'</div>':'')+
-      section('任务说明','<p class="prose">'+esc(t.detail||'暂无任务说明')+'</p>')+
-      section('进展时间线',history.length?'<div class="timeline">'+history.map(h=>'<div class="timeline-item"><small>'+esc(fmt(h.at))+' · '+esc(memberName(h.actor))+'</small><p>'+esc(h.text)+'</p></div>').join('')+'</div>':'<p class="muted form-hint">暂无进展记录</p>')+
-      '<div class="detail-actions">'+(!pending?action('edit-task',id,'编辑任务','btn primary')+action('delete-task',id,'申请删除','btn danger'):'<p class="form-hint">当前申请处理完成后，才可再次提交变更。</p>')+'</div>','TASK DETAIL',{type:'task',id});
-  }
-  function taskForm(id='') {
-    const t=state.data.tasks.find(t=>t.id===id);
-    if(id&&!t) return toast('任务不存在',true);
-    if(t&&state.data.requests.some(r=>r.taskId===id&&r.status==='pending')) return toast('此任务已有待审核变更，请先处理申请',true);
-    const owners=state.data.users.filter(u=>u.enabled!==false&&u.role!=='ADMIN');
-    const selected=t?.owners||[];
-    const unavailable=selected.filter(id=>!owners.some(u=>u.id===id));
-    openDialog(t?'编辑任务':'创建任务','<div class="section-note">'+icon('info')+'提交后需由另一位管理员或创始人审核，审核通过后生效。</div>'+
-      (unavailable.length?'<div class="inline-error">原负责人中有已停用账号，请重新分配负责人。</div>':'')+
-      '<form id="task-form"><div class="form-grid"><label class="full">任务名称<input name="title" maxlength="80" required placeholder="为团队安排一项清晰的任务" value="'+esc(t?.title||'')+'"></label><label>截止时间<input name="dueAt" type="datetime-local" required value="'+esc(t?.dueAt||'')+'"></label><label>优先级<select name="priority">'+Object.entries(priorities).map(([v,label])=>'<option value="'+v+'" '+((t?.priority||'medium')===v?'selected':'')+'>'+label+'</option>').join('')+'</select></label><div class="full"><label>任务负责人（可多选）<div class="owner-options">'+(owners.length?owners.map(u=>'<label class="owner-option"><input type="checkbox" name="owners" value="'+esc(u.id)+'" '+(selected.includes(u.id)?'checked':'')+'><span>'+esc(u.name)+'<small>'+esc(u.department)+' · '+esc(roles[u.role])+'</small></span></label>').join(''):'<span class="form-hint">暂无可分配成员，请先添加成员。</span>')+'</div></label></div><label class="full">任务说明<textarea name="detail" rows="5" maxlength="2000" placeholder="补充背景、目标和验收要求">'+esc(t?.detail||'')+'</textarea></label></div>'+formActions('提交'+(t?'编辑':'创建')+'申请')+'</form>','TASK REQUEST',{type:'task-form',id});
-  }
-  function comparison(r) {
-    const fields=[['title','任务名称'],['owners','负责人'],['dueAt','截止时间'],['priority','优先级'],['detail','任务说明']];
-    const format=(obj,key)=>{
-      if(!obj) return '—';
-      const value=obj[key];
-      if(key==='owners') return (value||[]).map(memberName).join('、')||'—';
-      if(key==='dueAt') return fmt(value);
-      if(key==='priority') return priorities[value]||value||'—';
-      return value||'—';
-    };
-    return '<div class="table-wrap"><table class="compare-table"><thead><tr><th>字段</th><th>变更前</th><th>变更后</th></tr></thead><tbody>'+fields.map(([key,label])=>{
-      const before=format(r.before,key),after=format(r.after,key),changed=before!==after;
-      return '<tr><th scope="row">'+label+'</th><td>'+esc(before)+'</td><td class="'+(changed?'changed':'')+'">'+esc(after)+'</td></tr>';
-    }).join('')+'</tbody></table></div>';
-  }
-  function requestDetail(id) {
-    const r=state.data.requests.find(r=>r.id===id);
-    if(!r) return toast('申请不存在，请刷新数据',true);
-    const canReview=r.status==='pending'&&r.proposer!==state.user.id;
-    openDialog(r.taskTitle||kinds[r.kind],'<div class="detail-tags">'+tag(kinds[r.kind],'blue')+reviewTag(r.status)+'</div>'+
-      detailGrid([['申请人',r.proposerName||memberName(r.proposer)],['申请时间',fmt(r.createdAt)],['审核人',r.reviewerName||memberName(r.reviewer)],['审核时间',fmt(r.reviewedAt)]])+
-      section('变更内容对比',comparison(r))+
-      (r.status!=='pending'?section('审核'+(r.status==='rejected'?'原因':'备注'),'<p class="prose">'+esc(r.reason||'审核通过，无补充备注')+'</p>'):'')+
-      (canReview?'<form id="review-form"><label>审核备注 / 驳回原因<textarea name="reason" maxlength="500" rows="3" placeholder="驳回时必须说明原因，通过时可选填备注"></textarea></label>'+inlineError()+'<div class="detail-actions" style="margin-top:20px"><button type="button" class="btn primary" data-action="approve-request" data-id="'+esc(id)+'">通过申请</button><button type="submit" class="btn danger">驳回申请</button></div></form>':r.status==='pending'?'<div class="section-note">'+icon('info')+'这是你提交的申请，需要由另一位管理员或创始人审核。</div>':''),
-      'REVIEW DETAIL',{type:'request',id});
-  }
   function userForm(id='') {
     if(state.user.role!=='ADMIN') return toast('只有管理员可以维护账号',true);
     const u=member(id);
     if(id&&(!u||['ADMIN','FOUNDER'].includes(u.role))) return toast('此账号受保护，不能在此修改',true);
-    openDialog(u?'编辑成员':'添加成员','<form id="user-form"><div class="form-grid"><label>姓名<input name="name" required maxlength="30" value="'+esc(u?.name||'')+'" placeholder="请输入姓名"></label><label>登录账号<input name="login" required pattern="[a-zA-Z0-9_-]{3,30}" minlength="3" maxlength="30" '+(u?'readonly':'')+' value="'+esc(u?.id||'')+'" placeholder="3～30 位字母、数字、_ 或 -"></label><label>部门<input name="department" required maxlength="40" value="'+esc(u?.department||'')+'" list="department-options" placeholder="输入或选择部门"><datalist id="department-options">'+[...new Set(state.data.users.map(u=>u.department))].map(d=>'<option value="'+esc(d)+'">').join('')+'</datalist></label><label>角色<select name="role">'+['EMPLOYEE','TEAM_LEAD','DEPT_MANAGER'].map(r=>'<option value="'+r+'" '+(u?.role===r?'selected':'')+'>'+roles[r]+'</option>').join('')+'</select></label>'+
-      (u?'<label class="check-label full"><input type="checkbox" name="enabled" '+(u.enabled!==false?'checked':'')+'>启用此账号</label><p class="form-hint full">保存后该成员需重新登录；停用后将无法访问系统。原任务、日志等业务记录会保留。</p>':'<p class="form-hint full">新成员的初始密码与登录账号相同，创建后可通过“重置密码”为其设置新密码。</p>')+'</div>'+formActions(u?'保存修改':'创建成员')+'</form>','TEAM MEMBER',{type:'user-form',id});
+    openDialog(u?'编辑成员':'添加成员','<form id="user-form"><div class="form-grid"><label>姓名<input name="name" required maxlength="30" value="'+esc(u?.name||'')+'" placeholder="请输入姓名"></label><label>手机号<input type="tel" name="phone" required maxlength="24" value="'+esc(u?.phone||'')+'" autocomplete="tel" placeholder="用于手机号登录"></label><label>性别<select name="gender"><option value="">未填写</option>'+['男','女','其他'].map(g=>'<option '+(u?.gender===g?'selected':'')+'>'+g+'</option>').join('')+'</select></label><label>身份证号<input name="idNumber" maxlength="18" pattern="[0-9]{17}[0-9Xx]" value="'+esc(u?.idNumber||'')+'" placeholder="选填，18 位"></label><label>部门<input name="department" required maxlength="40" value="'+esc(u?.department||'')+'" list="department-options" placeholder="输入或选择部门"><datalist id="department-options">'+[...new Set(state.data.users.map(u=>u.department))].map(d=>'<option value="'+esc(d)+'">').join('')+'</datalist></label><label>角色<select name="role">'+['EMPLOYEE','TEAM_LEAD','DEPT_MANAGER'].map(r=>'<option value="'+r+'" '+(u?.role===r?'selected':'')+'>'+roles[r]+'</option>').join('')+'</select></label>'+
+      (u?'<label class="check-label full"><input type="checkbox" name="enabled" '+(u.enabled!==false?'checked':'')+'>启用此账号</label><p class="form-hint full">成员可用手机号或姓名登录。停用后无法登录，重新启用后需重新登录。</p>':'<p class="form-hint full">成员可用手机号或姓名登录。创建时自动生成 18 位强密码，只在创建成功后展示一次，请妥善交付给本人。</p>')+'</div>'+formActions(u?'保存修改':'创建成员')+'</form>','TEAM MEMBER',{type:'user-form',id});
   }
   function passwordForm(id) {
     const u=member(id);
     if(state.user.role!=='ADMIN'||!u||['ADMIN','FOUNDER'].includes(u.role)) return toast('无法重置此账号的密码',true);
-    openDialog('重置密码',detailGrid([['成员',u.name],['登录账号',u.id]])+'<form id="password-form"><div class="form-grid"><label class="full">新密码<input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="64" required placeholder="设置 8～64 位新密码"></label><label class="full">确认新密码<input type="password" name="confirmPassword" autocomplete="new-password" minlength="8" maxlength="64" required placeholder="再次输入新密码"></label><p class="form-hint full">密码重置成功后，该成员的原登录状态将立即失效。</p></div>'+formActions('确认重置密码')+'</form>','ACCOUNT SECURITY',{type:'password-form',id});
-  }
-  function logDetail(id) {
-    const l=state.data.logs.find(l=>l.id===id);
-    if(!l) return toast('日志不存在，请刷新数据',true);
-    const versions=[...(l.versions||[])].sort((a,b)=>b.at.localeCompare(a.at));
-    const related=state.data.tasks.find(t=>t.id===l.taskId);
-    openDialog(l.title,detailGrid([['作者',l.authorName||memberName(l.author)],['日志日期',l.date],['更新时间',fmt(l.updatedAt)],['关联任务',related?.title||(l.taskId?'任务已归档':'无')]])+
-      section('日志正文','<p class="prose">'+esc(l.content)+'</p>')+
-      section('历史版本 · '+versions.length,versions.length?versions.map((v,i)=>'<details class="version-item"><summary>'+esc(fmt(v.at))+' · '+esc(memberName(v.actor))+' · 历史记录 '+(versions.length-i)+'</summary><div class="prose"><strong>'+esc(v.title)+'</strong><br>'+esc(v.content)+'<br><small>关联任务：'+esc(state.data.tasks.find(t=>t.id===v.taskId)?.title||(v.taskId?'任务已归档':'无'))+'</small></div></details>').join(''):'<p class="form-hint">尚无历史修改版本。</p>'),'WORK JOURNAL');
+    openDialog('重置密码',detailGrid([['成员',u.name],['手机号',u.phone||'未填写，可用姓名登录']])+'<form id="password-form"><div class="form-grid"><label class="full">新密码<input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="64" required placeholder="设置 8～64 位新密码"></label><label class="full">确认新密码<input type="password" name="confirmPassword" autocomplete="new-password" minlength="8" maxlength="64" required placeholder="再次输入新密码"></label><p class="form-hint full">密码重置成功后，该成员的原登录状态将立即失效。</p></div>'+formActions('确认重置密码')+'</form>','ACCOUNT SECURITY',{type:'password-form',id});
   }
   function announcementDetail(id) {
     const a=state.data.announcements.find(a=>a.id===id);
@@ -329,7 +226,7 @@
     if(el) {el.textContent=error.message;el.hidden=false;el.scrollIntoView({block:'nearest'});}
     toast(error.message,true);
   }
-  async function mutate(operation,message) {
+  async function mutate(operation,message,onSuccess) {
     if(state.busy) return;
     state.busy=true;
     const session=state.session;
@@ -337,10 +234,11 @@
     const disabled=controls.map(el=>el.disabled);
     controls.forEach(el=>el.disabled=true);
     try {
-      await operation();
+      const result=await operation();
       if(session!==state.session) return;
       $('confirm-dialog').close(); $('detail-dialog').close(); dialogContext=null; confirmCallback=null;
       toast(message); await reload();
+      if(session===state.session) onSuccess?.(result);
     } catch(error) {if(session===state.session) showFormError(error);}
     finally {state.busy=false;controls.forEach((el,i)=>el.disabled=disabled[i]);}
   }
@@ -359,37 +257,25 @@
       if(name==='refresh') return void reload();
       if(name==='page') {state.pages[state.page]=Number(id);render();return;}
       if(name==='reset-filters') return resetFilters();
-      if(name==='go-reviews') {state.reviewTab='pending';state.pages.reviews=1;return navigate('reviews');}
       if(name.startsWith('go-')) return navigate(name.slice(3));
-      if(name==='review-tab') {state.reviewTab=id;state.pages.reviews=1;render();return;}
-      if(name==='stat') {
-        const n=Number(id);
-        if(n===1) {state.reviewTab='pending';navigate('reviews');}
-        else if(n===3) navigate('logs');
-        else {state.filters.tasks=n===2?{overdue:'yes'}:{};state.pages.tasks=1;navigate('tasks');}
-        return;
-      }
       if(!state.data) return;
-      if(name==='task-detail') return taskDetail(id);
-      if(name==='new-task') return taskForm();
-      if(name==='edit-task') return taskForm(id);
-      if(name==='request-detail') return requestDetail(id);
       if(name==='new-user') return userForm();
+      if(name==='new-highlight') return highlightForm();
+      if(name==='edit-highlight') return highlightForm(id);
+      if(name==='highlight-detail') return highlightDetail(id);
+      if(name==='toggle-highlight') {
+        const h=state.data.highlights.find(h=>h.id===id);
+        return void mutate(()=>api('/admin/highlights/'+encodeURIComponent(id),{method:'PUT',body:{...h,enabled:!h.enabled}}),h.enabled?'内容已停用':'内容已发布');
+      }
+      if(name==='delete-highlight') {
+        const h=state.data.highlights.find(h=>h.id===id);
+        return confirmAction('删除这项内容？','“'+h.title+'”将从十大展示项中移除，关联任务仍可在任务视图查看。',()=>mutate(()=>api('/admin/highlights/'+encodeURIComponent(id),{method:'DELETE'}),'内容已删除'),true);
+      }
       if(name==='edit-user') return userForm(id);
       if(name==='reset-password') return passwordForm(id);
-      if(name==='log-detail') return logDetail(id);
       if(name==='announcement-detail') return announcementDetail(id);
       if(name==='new-announcement') return announcementForm();
       if(name==='edit-announcement') return announcementForm(id);
-      if(name==='delete-task') {
-        const t=state.data.tasks.find(t=>t.id===id);
-        return confirmAction('提交任务删除申请？','“'+t.title+'”将在另一位管理员或创始人审核通过后归档。',()=>mutate(()=>api('/tasks/requests',{method:'POST',body:{kind:'delete',taskId:id}}),'删除申请已提交，等待审核'),true);
-      }
-      if(name==='approve-request') {
-        const r=state.data.requests.find(r=>r.id===id);
-        const reason=$('review-form').elements.reason.value.trim();
-        return confirmAction('通过这项申请？','审核通过后，“'+r.taskTitle+'”的'+(kinds[r.kind]||'变更')+'将立即生效。',()=>mutate(()=>api('/tasks/requests/'+encodeURIComponent(id)+'/review',{method:'POST',body:{approve:true,reason}}),'申请已通过'));
-      }
       if(name==='toggle-pin') {
         const a=state.data.announcements.find(a=>a.id===id);
         return void mutate(()=>api('/admin/announcements/'+encodeURIComponent(id),{method:'PUT',body:{...a,pinned:!a.pinned}}),a.pinned?'已取消置顶':'公告已置顶');
@@ -405,6 +291,12 @@
     if(!event.target.closest('.sidebar,.mobile-menu')) $('app-view').classList.remove('menu-open');
   });
   document.addEventListener('change',event=>{
+    if(event.target.matches('#highlight-form [name="kind"]')) return updateHighlightFields();
+    if(event.target.matches('#highlight-form [name="taskId"]')) {
+      const task=state.data.tasks.find(t=>t.id===event.target.value), form=$('highlight-form');
+      if(task) {if(!form.elements.title.value) form.elements.title.value=task.title;if(!form.elements.content.value) form.elements.content.value=task.detail||task.title;}
+      return;
+    }
     if(!event.target.matches('#filter-form [data-filter]')) return;
     applyFilters($('filter-form'));
   });
@@ -415,7 +307,7 @@
   }
   document.addEventListener('submit',event=>{
     const form=event.target;
-    if(!['login-form','filter-form','task-form','review-form','user-form','password-form','announcement-form','confirm-form'].includes(form.id)) return;
+    if(!['login-form','filter-form','user-form','password-form','announcement-form','highlight-form','confirm-form'].includes(form.id)) return;
     event.preventDefault();
     if(form.id==='login-form') return;
     if(state.busy) return;
@@ -423,20 +315,15 @@
     if(form.id==='confirm-form') return void confirmCallback?.();
     const data=Object.fromEntries(new FormData(form)),id=dialogContext?.id;
     try {
-      if(form.id==='task-form') {
-        const owners=new FormData(form).getAll('owners');
-        if(!owners.length) throw new Error('请至少选择一位负责人');
-        const values={title:data.title.trim(),detail:data.detail.trim(),dueAt:data.dueAt,priority:data.priority,owners};
-        return void mutate(()=>api('/tasks/requests',{method:'POST',body:{kind:id?'edit':'create',taskId:id||undefined,values}}),'任务'+(id?'编辑':'创建')+'申请已提交，等待审核');
-      }
-      if(form.id==='review-form') {
-        const reason=data.reason.trim();
-        if(!reason) throw new Error('驳回申请时必须填写原因');
-        return confirmAction('驳回这项申请？','驳回原因：'+reason,()=>mutate(()=>api('/tasks/requests/'+encodeURIComponent(id)+'/review',{method:'POST',body:{approve:false,reason}}),'申请已驳回'),true);
+      if(form.id==='highlight-form') {
+        const body={kind:data.kind,audience:data.audience||'',position:Number(data.position),taskId:data.taskId||null,title:data.title.trim(),content:data.content.trim(),enabled:data.enabled==='on'};
+        return void mutate(()=>api('/admin/highlights'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'十大内容已更新':'十大内容已保存');
       }
       if(form.id==='user-form') {
-        const body={name:data.name.trim(),department:data.department.trim(),role:data.role,enabled:data.enabled==='on',login:data.login.trim()};
-        return void mutate(()=>api('/admin/users'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'成员信息已更新':'成员已创建，初始密码与账号相同');
+        const body={name:data.name.trim(),phone:data.phone.trim(),gender:data.gender,idNumber:data.idNumber.trim(),department:data.department.trim(),role:data.role,enabled:data.enabled==='on'};
+        return void mutate(()=>api('/admin/users'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'成员信息已更新':'成员已创建',id?undefined:created=>{
+          openDialog('成员已创建',detailGrid([['姓名',created.name],['手机号',created.phone]])+'<p class="form-hint">初始密码仅展示本次，请复制并通过可靠方式交给本人。关闭后不能再次查看，遗失可重置。</p><label>初始强密码<input id="temporary-password" readonly value="'+esc(created.temporaryPassword)+'" aria-label="初始强密码" autocomplete="off"></label><div class="form-actions">'+action('close-dialog','','已保存密码','btn primary')+'</div>','ACCOUNT CREATED');
+        });
       }
       if(form.id==='password-form') {
         if(data.password!==data.confirmPassword) throw new Error('两次输入的密码不一致');
@@ -455,18 +342,19 @@
     if(button.disabled) return;
     button.disabled=true;button.textContent='正在登录…';$('login-error').hidden=true;
     try {
-      const body=Object.fromEntries(new FormData(form));body.username=body.username.trim();
+      const body=Object.fromEntries(new FormData(form));body.identifier=body.identifier.trim();
       const result=await api('/auth/login',{method:'POST',body});
       if(!['ADMIN','FOUNDER'].includes(result.user?.role)) throw new Error('仅管理员和创始人可登录管理后台');
       localStorage.setItem(tokenKey,result.token);
       await enter(result.user);
     } catch(error) {$('login-error').textContent=error.message;$('login-error').hidden=false;}
-    finally {button.disabled=false;button.innerHTML='登录工作台 <span>→</span>';}
+    finally {button.disabled=false;button.innerHTML='登录管理端 <span>→</span>';}
   });
   for(const dialog of document.querySelectorAll('dialog')) {
     dialog.addEventListener('cancel',event=>{if(state.busy) event.preventDefault();});
     dialog.addEventListener('click',event=>{if(event.target===dialog&&!state.busy){const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom) dialog.close();}});
     dialog.addEventListener('close',()=>{
+      if(dialog.id==='detail-dialog'&&!dialog.open) {$('dialog-content').innerHTML='';dialogContext=null;}
       if(dialog.id==='confirm-dialog') confirmCallback=null;
       if(!document.querySelector('dialog[open]')) document.body.style.overflow='';
     });

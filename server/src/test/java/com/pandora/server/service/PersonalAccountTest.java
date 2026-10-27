@@ -27,6 +27,7 @@ class PersonalAccountTest {
         user.setDepartment("测试部门");
         user.setPasswordHash(encoder.encode("old-pass-123"));
         when(users.findById(user.getId())).thenReturn(Optional.of(user));
+        when(users.findByName(user.getName())).thenReturn(List.of(user));
         return user;
     }
 
@@ -35,7 +36,7 @@ class PersonalAccountTest {
         User user = user();
         AuthService auth = new AuthService(users, encoder, "a-test-secret-with-at-least-32-bytes-long", 3600000);
         UserService service = new UserService(users, encoder);
-        String token = auth.authenticate(user.getId(), "old-pass-123");
+        String token = auth.authenticate(user.getName(), "old-pass-123");
         assertEquals(user.getId(), auth.validateToken(token));
         String originalHash = user.getPasswordHash();
         assertThrows(IllegalArgumentException.class, () -> service.changePassword(user, "wrong-pass", "new-pass-456"));
@@ -48,9 +49,26 @@ class PersonalAccountTest {
         service.changePassword(user, "old-pass-123", "new-pass-456");
         assertTrue(encoder.matches("new-pass-456", user.getPasswordHash()));
         assertNull(auth.validateToken(token));
-        assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getId(), "old-pass-123"));
-        assertEquals(user.getId(), auth.validateToken(auth.authenticate(user.getId(), "new-pass-456")));
+        assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getName(), "old-pass-123"));
+        assertEquals(user.getId(), auth.validateToken(auth.authenticate(user.getName(), "new-pass-456")));
         verify(users).save(user);
+    }
+
+    @Test
+    void phoneNameLoginHandlesDuplicatesAndNeverAuthenticatesInternalIds() {
+        User user = user(); user.setPhone("13800138000");
+        when(users.findByPhone("13800138000")).thenReturn(List.of(user));
+        AuthService auth = new AuthService(users, encoder, "a-test-secret-with-at-least-32-bytes-long", 3600000);
+        assertEquals(user.getId(), auth.validateToken(auth.authenticate("138 0013 8000", "old-pass-123")));
+        assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getId(), "old-pass-123"));
+        User namesake = new User(); namesake.setId("namesake"); namesake.setName(user.getName()); namesake.setRole(User.Role.EMPLOYEE);
+        namesake.setPasswordHash(encoder.encode("another-pass-123"));
+        when(users.findByName(user.getName())).thenReturn(List.of(user, namesake));
+        assertEquals(user.getId(), auth.validateToken(auth.authenticate(user.getName(), "old-pass-123")));
+        namesake.setPasswordHash(user.getPasswordHash());
+        assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getName(), "old-pass-123"));
+        user.setEnabled(false);
+        assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getPhone(), "old-pass-123"));
     }
 
     @Test
