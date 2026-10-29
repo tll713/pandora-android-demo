@@ -35,14 +35,19 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.rgb(38, 79, 64));
+        getWindow().setStatusBarColor(Color.rgb(247, 249, 246));
         getWindow().setNavigationBarColor(Color.WHITE);
+        // 状态栏使用深色图标，避免浅色背景上看不清时间与电量
+        // 注意：Window.getInsetsController() 在 onCreate 早期可能返回 null，这里改用 decor 视图设置，避免空指针闪退
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         web = new WebView(this);
         web.setBackgroundColor(Color.rgb(247, 249, 246));
-        web.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets.consumeSystemWindowInsets();
-        });
+        // Android 15 起强制 edge-to-edge，WebView 不支持 env(safe-area-inset-*)，
+        // 这里直接按系统资源读取状态栏/导航栏高度给 WebView 加内边距，避免内容被系统栏遮挡
+        int density = Math.max(1, getResources().getDisplayMetrics().densityDpi / 160);
+        int topInset = systemBarHeight("status_bar_height", 24 * density) + 8 * density;
+        int bottomInset = systemBarHeight("navigation_bar_height", 0) + 4 * density;
+        web.setPadding(0, topInset, 0, bottomInset);
         setContentView(web);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -50,7 +55,7 @@ public final class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.4.1");
+        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.4.4");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -107,6 +112,17 @@ public final class MainActivity extends Activity {
         web.loadUrl("https://" + ORIGIN + "/index.html");
     }
     private boolean isLocal(Uri url) { return "https".equals(url.getScheme()) && ORIGIN.equals(url.getHost()); }
+    /** 读取系统栏高度，取不到时使用兜底值 */
+    private int systemBarHeight(String name, int fallback) {
+        try {
+            int resId = getResources().getIdentifier(name, "dimen", "android");
+            if (resId > 0) {
+                int value = getResources().getDimensionPixelSize(resId);
+                if (value > 0) return value;
+            }
+        } catch (Exception ignored) { }
+        return fallback;
+    }
     private static String apiOrigin() {
         Uri api = Uri.parse(API_BASE);
         return api.getScheme() + "://" + api.getAuthority();

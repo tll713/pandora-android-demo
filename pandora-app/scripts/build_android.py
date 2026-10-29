@@ -19,9 +19,15 @@ parser.add_argument('--keystore', type=Path, help='Reuse an existing demo signin
 args = parser.parse_args()
 CACHE, JAVA = args.tools.resolve(), args.java_home.resolve()
 BUILD = CACHE / 'pandora-build'
-manifest = ET.parse(ROOT / 'android/AndroidManifest.xml').getroot()
-version = manifest.attrib['{http://schemas.android.com/apk/res/android}versionName']
-version_code = manifest.attrib['{http://schemas.android.com/apk/res/android}versionCode']
+ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+manifest = ET.parse(ROOT / 'android/AndroidManifest.xml')
+root = manifest.getroot()
+version = root.attrib['{http://schemas.android.com/apk/res/android}versionName']
+version_code = int(root.attrib['{http://schemas.android.com/apk/res/android}versionCode'])
+# 每次构建自动递增 versionCode，保证新 APK 可以直接覆盖安装旧版本
+version_code += 1
+root.set('{http://schemas.android.com/apk/res/android}versionCode', str(version_code))
+manifest.write(ROOT / 'android/AndroidManifest.xml', encoding='utf-8', xml_declaration=True)
 
 def run(*cmd):
     print('Running:', Path(str(cmd[0])).name, flush=True)
@@ -66,10 +72,11 @@ run(JAVA / 'bin/java.exe', '-cp', TOOLS / 'lib/d8.jar', 'com.android.tools.r8.D8
 with zipfile.ZipFile(BUILD / 'unsigned.apk', 'a', compression=zipfile.ZIP_DEFLATED) as archive:
     archive.write(BUILD / 'dex/classes.dex', 'classes.dex')
 run(TOOLS / 'zipalign.exe', '-f', '4', BUILD / 'unsigned.apk', BUILD / 'aligned.apk')
-keystore = args.keystore.resolve() if args.keystore else CACHE / 'pandora-demo.keystore'
+keystore = args.keystore.resolve() if args.keystore else ROOT / 'keystore/pandora-demo.keystore'
 if args.keystore and not keystore.exists():
     raise SystemExit('The specified signing key does not exist.')
 if not keystore.exists():
+    keystore.parent.mkdir(parents=True, exist_ok=True)
     run(JAVA / 'bin/keytool.exe', '-genkeypair', '-keystore', keystore, '-storepass', 'android', '-keypass', 'android', '-alias', 'pandora-demo', '-dname', 'CN=Pandora Classroom Demo', '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10000', '-storetype', 'JKS')
 output = ROOT / f'deliverables/pandora-demo-{version}.apk'
 output.parent.mkdir(parents=True, exist_ok=True)

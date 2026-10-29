@@ -20,7 +20,7 @@
   font-synthesis: none;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--paper); }
+body { margin: 0; min-width: 320px; background: var(--paper); padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(90, 134, 104, .28); outline-offset: 2px; }
@@ -93,7 +93,7 @@ dialog { width: min(600px, calc(100% - 28px)); max-height: min(750px, calc(100% 
 button:focus-visible, [role="button"]:focus-visible { outline: 3px solid #cb974c; outline-offset: 3px; }
 
 /* Authentication */
-.login-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: linear-gradient(150deg, #eef4ea 0%, var(--paper) 45%, #edf3f6 100%); }
+.login-page { min-height: calc(100dvh - env(safe-area-inset-top)); display: grid; place-items: center; padding: 24px; background: linear-gradient(150deg, #eef4ea 0%, var(--paper) 45%, #edf3f6 100%); }
 .login-card { width: min(420px, 100%); padding: 42px; border: 1px solid var(--line); border-radius: 16px; background: white; box-shadow: 0 22px 60px rgba(39,60,48,.12); }
 .login-brand { padding: 0 0 34px; }
 .login-card h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; }
@@ -102,6 +102,14 @@ button:focus-visible, [role="button"]:focus-visible { outline: 3px solid #cb974c
 .login-card form label { display: grid; gap: 8px; color: #506158; font-size: 13px; font-weight: 700; }
 .login-card input { width: 100%; min-height: 48px; padding: 12px 14px; border: 1px solid #dbe4dc; border-radius: 8px; background: #fbfcfa; color: var(--ink); font-size: 16px; }
 .login-button { min-height: 48px; margin-top: 6px; }
+.auth-switch { display: block; width: 100%; margin-top: 18px; text-align: center; color: var(--green); font-size: 14px; }
+.profile-card { padding: 32px; }
+.profile-warning { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; padding: 14px 16px; border-radius: 12px; background: #fff8e6; border: 1px solid #f0d98c; }
+.profile-warning .warning-icon { flex-shrink: 0; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: #f5c542; color: #5a4300; font-size: 20px; }
+.profile-warning h2 { margin: 0 0 4px; font-size: 17px; color: #5a4300; }
+.profile-warning p { margin: 0; font-size: 13px; color: #8a6d1a; }
+.login-card select { width: 100%; min-height: 48px; padding: 12px 14px; border: 1px solid #dbe4dc; border-radius: 8px; background: #fbfcfa; color: var(--ink); font-size: 16px; }
+.form-error { margin-top: -8px; color: #c0392b; font-size: 13px; font-weight: 500; min-height: 18px; }
 
 /* Log filters */
 .log-filter { display: grid; gap: 14px; margin-bottom: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: white; }

@@ -34,18 +34,18 @@ try {
   await page.locator('[data-close]').click();
 
   await page.locator('[data-route="calendar"]').click();
-  assert.equal(await page.locator('.calendar-day.is-today .day-task').count(), 0, 'month cells show markers only');
-  assert.equal(await page.locator('.calendar-day.is-today .calendar-dot').count(), 5, 'month cell shows task dots plus a log dot');
-  await page.locator('.calendar-day.is-today .day-summary').click();
-  assert.equal(await page.locator('.timeline-item').count(), 6, 'day view should show tasks and logs on the selected date');
-  assert.equal(await page.locator('.timeline-item.event--log').count(), 1, 'calendar should render the day log');
-  await page.locator('[data-task-view="list"]').click();
-  assert.equal(await page.locator('.task-table tbody tr').count(), 5, 'task table should live inside the view');
-
-  await page.locator('[data-task-view="calendar"]').click();
-  await page.locator('.segment[data-mode="month"]').click();
+  assert.equal(await page.locator('.calendar-event-bar').count(),6);
   await page.locator('.calendar-day.is-today .day-date').click();
-  assert.equal(await page.locator('.timeline-item').count(), 6);
+  await page.locator('[data-mode=day]').click();
+  assert.equal(await page.locator('.timeline-item').count(),6);
+  assert.equal(await page.locator('.timeline-item.event--log').count(),1);
+  await page.locator('[data-task-view="list"]').click();
+  assert.equal(await page.locator('.task-table tbody tr').count(),5);
+  await page.locator('[data-task-view="calendar"]').click();
+  await page.locator('[data-action="calendar-back"]').click();
+  await page.locator('.calendar-day.is-today .day-date').click();
+  await page.locator('[data-mode=day]').click();
+  assert.equal(await page.locator('.timeline-item').count(),6);
   for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 844 }, { width: 1280, height: 900 }]) {
     await page.setViewportSize(viewport);
     await page.locator('[data-route="dashboard"]').click();

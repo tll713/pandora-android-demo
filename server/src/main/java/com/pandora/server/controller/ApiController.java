@@ -70,6 +70,60 @@ public class ApiController {
         }
     }
 
+    @PostMapping("/auth/register")
+    public ResponseEntity<?> register(@RequestBody Map<String, String> body) {
+        String phone = body.get("phone");
+        String password = body.get("password");
+        String name = body.get("name");
+        try {
+            AuthService.LoginResult result = authService.register(phone, password, name);
+            return ResponseEntity.ok(Map.of(
+                "token", result.token(),
+                "user", profileToMap(result.user())
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** 当前用户完善个人资料（实名认证） */
+    @PutMapping("/auth/profile")
+    public ResponseEntity<?> updateProfile(@AuthenticationPrincipal UserDetails ud,
+                                           @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        try {
+            String name = body.get("name");
+            String gender = body.get("gender");
+            String idNumber = body.get("idNumber");
+            String department = body.get("department");
+            if (name == null || name.trim().isEmpty() || name.trim().length() > 30)
+                throw new IllegalArgumentException("姓名需为 1～30 个字");
+            if (gender == null || !List.of("男", "女", "其他").contains(gender.trim()))
+                throw new IllegalArgumentException("请选择有效性别");
+            String idv = idNumber == null ? "" : idNumber.trim().toUpperCase();
+            if (!idv.matches("^[0-9]{17}[0-9X]$"))
+                throw new IllegalArgumentException("身份证号需为 18 位有效格式");
+            try {
+                java.time.LocalDate.of(Integer.parseInt(idv.substring(6, 10)),
+                        Integer.parseInt(idv.substring(10, 12)), Integer.parseInt(idv.substring(12, 14)));
+            } catch (Exception e) {
+                throw new IllegalArgumentException("身份证号中的出生日期无效");
+            }
+            if (department == null || department.trim().isEmpty() || department.trim().length() > 40)
+                throw new IllegalArgumentException("部门需为 1～40 个字");
+            user.setName(name.trim());
+            user.setGender(gender.trim());
+            user.setIdNumber(idv);
+            user.setDepartment(department.trim());
+            user.setAvatar(name.trim().substring(name.trim().length() - 1));
+            userRepository.save(user);
+            return ResponseEntity.ok(profileToMap(user));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @GetMapping("/auth/me")
     public ResponseEntity<?> me(@AuthenticationPrincipal UserDetails ud) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
@@ -403,6 +457,7 @@ public class ApiController {
         m.put("gender", u.getGender());
         m.put("idNumber", u.getIdNumber());
         m.put("avatarData", u.getAvatarData());
+        m.put("profileComplete", u.isProfileComplete());
         return m;
     }
 
@@ -416,6 +471,7 @@ public class ApiController {
         m.put("title", t.getTitle());
         m.put("detail", t.getDetail());
         m.put("priority", t.getPriority().name().toLowerCase());
+        m.put("startAt", (t.getStartAt() != null ? t.getStartAt() : t.getDueAt()).toString().substring(0, 16));
         m.put("dueAt", t.getDueAt().toString().substring(0, 16));
         m.put("status", t.getStatus().name().toLowerCase());
         m.put("creator", t.getCreatorId());

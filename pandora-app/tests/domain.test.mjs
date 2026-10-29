@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { USERS, userById, seedDatabase, validateDatabase, createTask, requestTaskChange, reviewTaskChange,
   canSeeTask, visibleTasks, visibleLogs, updateTaskDetail, completeTask, saveLog, canEditLog, recentLogs,
-  calendarDays, shiftCalendar, togglePin, createDemoAccount, isOverdue, isValidMinute } from '../src/domain.js';
+  calendarDays, shiftCalendar, togglePin, createDemoAccount, isOverdue, isValidMinute, taskOccursOn, taskStartAt } from '../src/domain.js';
 const manager=userById('manager'), lin=userById('lin'), zhou=userById('zhou'), founder=userById('founder'), admin=userById('admin');
 const now=new Date('2026-10-14T10:30:00'), db=()=>seedDatabase(now);
 const values={title:'验收任务',owners:['lin','zhou'],priority:'high',dueAt:'2026-10-15T16:45',detail:'交付可评审初稿'};
@@ -130,4 +130,21 @@ test('only admin creates demo accounts, duplicate identifiers and privileged rol
   const u=createDemoAccount(data,admin,v); assert.equal(u.id,'demo_new'); assert.equal(data.members.length,1);
   assert.throws(()=>createDemoAccount(data,admin,v),/已存在/); assert.equal(validateDatabase(data),true);
   USERS.splice(USERS.findIndex(u=>u.id==='demo_new'),1);
+});
+
+test('task intervals survive approval and edits, include boundaries, and reject reversed dates',()=>{
+  const data=db();
+  const interval={...values,startAt:'2026-10-12T09:00',dueAt:'2026-10-18T18:00'};
+  const req=createTask(data,manager,interval,now);
+  reviewTaskChange(data,founder,req.id,true,'',now);
+  const task=data.tasks.find(t=>t.id===req.taskId);
+  assert.equal(task.startAt,interval.startAt);
+  for(const date of ['2026-10-12','2026-10-15','2026-10-18']) assert.equal(taskOccursOn(task,date),true);
+  for(const date of ['2026-10-11','2026-10-19']) assert.equal(taskOccursOn(task,date),false);
+  assert.equal(taskStartAt({dueAt:values.dueAt}),values.dueAt,'legacy tasks stay on due date');
+  assert.throws(()=>createTask(data,manager,{...interval,startAt:'2026-10-19T09:00'},now),/结束时间/);
+  assert.throws(()=>createTask(data,manager,{...interval,startAt:'2026-02-30T09:00'},now),/开始时间/);
+  const edit=requestTaskChange(data,manager,'edit',{...values,dueAt:'2026-10-20T18:00'},task.id,now);
+  reviewTaskChange(data,founder,edit.id,true,'',now);
+  assert.equal(task.startAt,interval.startAt,'older clients preserve an existing start time');
 });

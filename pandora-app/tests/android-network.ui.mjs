@@ -51,6 +51,9 @@ try {
       await page.locator('.dashboard-page').waitFor();
       assert.deepEqual(violations,[]);
       await page.locator('[data-route=calendar]').click();
+      await page.locator('.ios-calendar--month').waitFor();
+      await page.locator('.calendar-day.is-today .day-date').click();
+      await page.locator('[data-mode=day]').click();
       await page.locator('.calendar-day-timeline').waitFor();
       await page.screenshot({path:path.join(artifacts,'android-network-login.png'),fullPage:true});
     }

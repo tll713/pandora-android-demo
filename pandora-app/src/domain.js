@@ -54,14 +54,19 @@ function cleaned(value, name, max) {
   requireValue(text.length > 0, `请填写${name}`);
   requireValue(text.length <= max, `${name}不能超过 ${max} 个字`); return text;
 }
-function taskValues(u, v) {
+export const taskStartAt = task => task.startAt || task.dueAt;
+export const taskOccursOn = (task, day) => taskStartAt(task).slice(0,10) <= day && task.dueAt.slice(0,10) >= day;
+function taskValues(u, v, existing) {
   const owners = [...new Set(v.owners || [])];
   requireValue(owners.length > 0 && owners.every(o => allowedAssignees(u).some(a => a.id === o)), '请选择管理范围内的负责人');
   requireValue(isValidMinute(v.dueAt), '截止时间需精确到分钟');
+  const startAt = v.startAt ?? existing?.startAt ?? v.dueAt;
+  requireValue(isValidMinute(startAt), '开始时间需精确到分钟');
+  requireValue(startAt <= v.dueAt, '结束时间不能早于开始时间');
   requireValue(Object.hasOwn(PRIORITY, v.priority), '请选择优先级');
   const detail = String(v.detail || '').trim();
   requireValue(detail.length <= 2000, '任务说明不能超过 2000 个字');
-  return { title: cleaned(v.title, '任务名称', 80), owners, dueAt: v.dueAt, priority: v.priority, detail };
+  return { title: cleaned(v.title, '任务名称', 80), owners, startAt, dueAt: v.dueAt, priority: v.priority, detail };
 }
 export function requestTaskChange(db, u, kind, values = {}, taskId = null, now = new Date()) {
   requireValue(['create', 'edit', 'delete'].includes(kind), '未知变更类型');
@@ -71,7 +76,7 @@ export function requestTaskChange(db, u, kind, values = {}, taskId = null, now =
     requireValue(canManageTask(u, task), '没有修改这项任务的权限');
     requireValue(!db.requests.some(r => r.taskId === taskId && r.status === 'pending'), '这项任务已有待审核变更');
   }
-  const after = kind === 'delete' ? null : taskValues(u, values);
+  const after = kind === 'delete' ? null : taskValues(u, values, task);
   const request = { id: id('request'), kind, taskId: task?.id || id('task'), proposer: u.id, status: 'pending',
     after, before: task ? structuredClone(task) : null, expectedRevision: task?.revision || 0, createdAt: new Date(now).toISOString() };
   db.requests.unshift(request); return request;
@@ -204,6 +209,6 @@ export function seedDatabase(now = new Date()) {
 export function validateDatabase(v) {
   if (v?.version !== 2 || !Array.isArray(v.members) || !Array.isArray(v.requests) || !Array.isArray(v.tasks) || !Array.isArray(v.logs) || !Array.isArray(v.announcements) || !v.pins) return false;
   const ids = new Set([...USERS, ...v.members].map(u => u.id));
-  return v.tasks.every(t => typeof t.id === 'string' && typeof t.title === 'string' && typeof t.detail === 'string' && Array.isArray(t.owners) && t.owners.length > 0 && t.owners.every(id => ids.has(id)) && isValidMinute(t.dueAt) && Object.hasOwn(STATUS, t.status) && Object.hasOwn(PRIORITY, t.priority) && Array.isArray(t.history) && Number.isInteger(t.revision)) &&
+  return v.tasks.every(t => typeof t.id === 'string' && typeof t.title === 'string' && typeof t.detail === 'string' && Array.isArray(t.owners) && t.owners.length > 0 && t.owners.every(id => ids.has(id)) && isValidMinute(t.dueAt) && (!t.startAt || (isValidMinute(t.startAt) && t.startAt <= t.dueAt)) && Object.hasOwn(STATUS, t.status) && Object.hasOwn(PRIORITY, t.priority) && Array.isArray(t.history) && Number.isInteger(t.revision)) &&
     v.logs.every(l => typeof l.content === 'string' && typeof l.title === 'string' && ids.has(l.author) && isValidDate(l.date) && Array.isArray(l.versions));
 }

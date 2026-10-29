@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title VARCHAR(80) NOT NULL,
   detail TEXT,
   priority ENUM('HIGH','MEDIUM','LOW') NOT NULL,
+  start_at DATETIME,
   due_at DATETIME NOT NULL,
   status ENUM('TODO','DOING','DONE') NOT NULL DEFAULT 'TODO',
   creator_id VARCHAR(30) NOT NULL,
@@ -172,6 +173,15 @@ DEALLOCATE PREPARE pandora_migration;
 SET @pandora_ddl = IF(
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'announcements' AND column_name = 'pinned') = 0,
   'ALTER TABLE announcements ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT FALSE', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+
+-- Explicit task intervals; existing tasks keep their original single due-date display.
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tasks' AND column_name = 'start_at') = 0,
+  'ALTER TABLE tasks ADD COLUMN start_at DATETIME', 'SELECT 1');
 PREPARE pandora_migration FROM @pandora_ddl;
 EXECUTE pandora_migration;
 DEALLOCATE PREPARE pandora_migration;

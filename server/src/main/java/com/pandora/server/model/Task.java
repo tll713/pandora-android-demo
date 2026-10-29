@@ -17,6 +17,8 @@ public class Task {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Priority priority;
+    @Column(name = "start_at")
+    private LocalDateTime startAt;
     @Column(name = "due_at", nullable = false)
     private LocalDateTime dueAt;
     @Enumerated(EnumType.STRING)
@@ -56,6 +58,8 @@ public class Task {
     public void setDetail(String detail) { this.detail = detail; }
     public Priority getPriority() { return priority; }
     public void setPriority(Priority priority) { this.priority = priority; }
+    public LocalDateTime getStartAt() { return startAt; }
+    public void setStartAt(LocalDateTime startAt) { this.startAt = startAt; }
     public LocalDateTime getDueAt() { return dueAt; }
     public void setDueAt(LocalDateTime dueAt) { this.dueAt = dueAt; }
     public Status getStatus() { return status; }

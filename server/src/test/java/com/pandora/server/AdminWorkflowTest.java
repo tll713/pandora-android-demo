@@ -143,6 +143,32 @@ class AdminWorkflowTest {
     }
 
     @Test
+    void taskIntervalsPersistThroughApprovalAndRejectInvalidDates() throws Exception {
+        var values = Map.of("title", "持续一周", "owners", new String[]{"employee"}, "startAt", "2027-01-04T09:00", "dueAt", "2027-01-10T18:00", "priority", "high", "detail", "跨天执行");
+        JsonNode request = call("POST", "/api/tasks/requests", admin, Map.of("kind", "create", "values", values));
+        assertEquals("2027-01-04T09:00", request.get("after").get("startAt").asText());
+        String taskId = request.get("taskId").asText();
+        call("POST", "/api/tasks/requests/" + request.get("id").asText() + "/review", founder, Map.of("approve", true));
+        JsonNode task = call("GET", "/api/admin/tasks", admin, null).findParents("id").stream().filter(t -> taskId.equals(t.get("id").asText())).findFirst().orElseThrow();
+        assertEquals("2027-01-04T09:00", task.get("startAt").asText());
+        assertEquals("2027-01-10T18:00", task.get("dueAt").asText());
+        var edited = Map.of("title", "延后一周", "owners", new String[]{"employee"}, "dueAt", "2027-01-17T18:00", "priority", "high");
+        JsonNode edit = call("POST", "/api/tasks/requests", founder, Map.of("kind", "edit", "taskId", taskId, "values", edited));
+        assertEquals("2027-01-04T09:00", edit.get("before").get("startAt").asText());
+        assertEquals("2027-01-04T09:00", edit.get("after").get("startAt").asText(), "Legacy clients must preserve start time");
+        call("POST", "/api/tasks/requests/" + edit.get("id").asText() + "/review", admin, Map.of("approve", true));
+        JsonNode workspace = call("GET", "/api/workspace", employee, null);
+        JsonNode saved = workspace.get("db").get("tasks").findParents("id").stream().filter(t -> taskId.equals(t.get("id").asText())).findFirst().orElseThrow();
+        assertEquals("2027-01-04T09:00", saved.get("startAt").asText());
+        assertEquals("2027-01-17T18:00", saved.get("dueAt").asText());
+        for (String invalid : new String[]{"2027-01-11T09:00", "2027-02-30T09:00", "2027-01-04", ""}) {
+            var bad = new java.util.HashMap<String, Object>(values); bad.put("startAt", invalid);
+            mvc.perform(post("/api/tasks/requests").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(Map.of("kind", "create", "values", bad)))).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
     void employeeCanRequestOwnTasksButCannotAssignOthersOrReview() throws Exception {
         var values = Map.of("title", "本人创建任务", "owners", new String[]{"employee"}, "dueAt", "2027-01-10T18:00", "priority", "high", "detail", "本人负责");
         JsonNode request = call("POST", "/api/tasks/requests", employee, Map.of("kind", "create", "values", values));

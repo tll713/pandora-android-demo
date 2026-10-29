@@ -99,7 +99,7 @@ public class TaskService {
 
         Map<String, Object> after = null;
         if (!"delete".equals(kind)) {
-            after = validateTaskValues(proposer, values);
+            after = validateTaskValues(proposer, values, task);
         }
 
         ChangeRequest req = new ChangeRequest();
@@ -115,7 +115,7 @@ public class TaskService {
         return changeRequestRepository.save(req);
     }
 
-    private Map<String, Object> validateTaskValues(User proposer, Map<String, Object> values) {
+    private Map<String, Object> validateTaskValues(User proposer, Map<String, Object> values, Task existing) {
         if (values == null) throw new IllegalArgumentException("请填写任务信息");
         List<String> owners = (List<String>) values.get("owners");
         if (owners == null || owners.isEmpty()) throw new IllegalArgumentException("请选择管理范围内的负责人");
@@ -131,6 +131,13 @@ public class TaskService {
             throw new IllegalArgumentException("截止时间需精确到分钟");
         try { LocalDateTime.parse(dueAt); }
         catch (java.time.DateTimeException e) { throw new IllegalArgumentException("请输入有效的截止时间"); }
+        String startAt = values.containsKey("startAt") ? (String) values.get("startAt")
+                : existing != null && existing.getStartAt() != null ? existing.getStartAt().toString().substring(0, 16) : dueAt;
+        if (startAt == null || !startAt.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}"))
+            throw new IllegalArgumentException("开始时间需精确到分钟");
+        try { LocalDateTime.parse(startAt); }
+        catch (java.time.DateTimeException e) { throw new IllegalArgumentException("请输入有效的开始时间"); }
+        if (startAt.compareTo(dueAt) > 0) throw new IllegalArgumentException("结束时间不能早于开始时间");
         String priority = (String) values.get("priority");
         if (!Set.of("high", "medium", "low").contains(priority)) throw new IllegalArgumentException("请选择优先级");
         String detail = (String) values.get("detail");
@@ -140,6 +147,7 @@ public class TaskService {
         Map<String, Object> result = new HashMap<>();
         result.put("title", title);
         result.put("owners", owners.stream().distinct().toList());
+        result.put("startAt", startAt);
         result.put("dueAt", dueAt);
         result.put("priority", priority);
         result.put("detail", detail);
@@ -179,7 +187,7 @@ public class TaskService {
                 task.setTitle((String) after.get("title"));
                 task.setDetail((String) after.get("detail"));
                 task.setPriority(Task.Priority.valueOf(((String) after.get("priority")).toUpperCase()));
-                task.setDueAt(LocalDateTime.parse((String) after.get("dueAt")));
+                applyTaskDates(task, after);
                 task.setStatus(Task.Status.TODO);
                 task.setCreatorId(req.getProposerId());
                 task.setRevision(1);
@@ -200,7 +208,7 @@ public class TaskService {
                     task.setTitle((String) after.get("title"));
                     task.setDetail((String) after.get("detail"));
                     task.setPriority(Task.Priority.valueOf(((String) after.get("priority")).toUpperCase()));
-                    task.setDueAt(LocalDateTime.parse((String) after.get("dueAt")));
+                    applyTaskDates(task, after);
                     task.setRevision(task.getRevision() + 1);
                     // 先保存 task 确保状态更新，再替换 owners
                     taskRepository.save(task);
@@ -279,6 +287,15 @@ public class TaskService {
 
     // ============ 辅助 ============
 
+    private void applyTaskDates(Task task, Map<String, Object> after) {
+        LocalDateTime due = LocalDateTime.parse((String) after.get("dueAt"));
+        LocalDateTime start = after.get("startAt") != null ? LocalDateTime.parse((String) after.get("startAt"))
+                : task.getStartAt() != null ? task.getStartAt() : due;
+        if (start.isAfter(due)) throw new IllegalArgumentException("结束时间不能早于开始时间");
+        task.setStartAt(start);
+        task.setDueAt(due);
+    }
+
     private void addHistory(Task task, String actorId, String text) {
         TaskHistory h = new TaskHistory();
         h.setTask(task);
@@ -294,6 +311,7 @@ public class TaskService {
         m.put("title", task.getTitle());
         m.put("detail", task.getDetail());
         m.put("priority", task.getPriority().name().toLowerCase());
+        m.put("startAt", (task.getStartAt() != null ? task.getStartAt() : task.getDueAt()).toString().substring(0, 16));
         m.put("dueAt", task.getDueAt().toString().substring(0, 16));
         m.put("owners", task.getOwners().stream().map(o -> o.getUser().getId()).collect(Collectors.toList()));
         m.put("status", task.getStatus().name().toLowerCase());

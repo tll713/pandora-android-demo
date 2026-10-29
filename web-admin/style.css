@@ -413,7 +413,7 @@ small {
   flex-direction:column;
   background:var(--green-dark);
   color:#dce6d8;
-  padding:28px 18px 0;
+  padding:28px 18px 18px;
   z-index:30
 }
 
@@ -505,6 +505,7 @@ small {
   display:flex;
   align-items:center;
   gap:10px;
+  margin-top:auto;
   border-top:1px solid #829b792e;
   padding:19px 6px
 }

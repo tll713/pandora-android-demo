@@ -52,6 +52,16 @@ public class User {
         return role == Role.ADMIN || role == Role.FOUNDER;
     }
 
+    /** 资料是否完善（手机号、姓名、性别、身份证号、部门均已填写） */
+    public boolean isProfileComplete() {
+        return phone != null && !phone.isBlank()
+            && name != null && !name.isBlank()
+            && gender != null && !gender.isBlank()
+            && idNumber != null && !idNumber.isBlank()
+            && department != null && !department.isBlank()
+            && !"待分配".equals(department);
+    }
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getName() { return name; }
