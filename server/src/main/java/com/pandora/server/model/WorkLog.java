@@ -26,6 +26,9 @@ public class WorkLog {
     @Column(name = "task_id")
     private String taskId;
 
+    @Column(name = "tag_id", length = 40)
+    private String tagId;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -48,6 +51,8 @@ public class WorkLog {
     public void setContent(String content) { this.content = content; }
     public String getTaskId() { return taskId; }
     public void setTaskId(String taskId) { this.taskId = taskId; }
+    public String getTagId() { return tagId; }
+    public void setTagId(String tagId) { this.tagId = tagId; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

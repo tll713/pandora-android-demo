@@ -95,7 +95,7 @@ try {
   await page.locator('[data-calendar-month="2026-12-01"]').click();
   assert.equal(await page.locator('.ios-month-title').innerText(),'十二月');
   await page.locator('[data-action=today]').click();
-  await page.locator('[data-action=calendar-search]').click();
+  await page.locator('.calendar-view-row [data-task-view="list"]').click();
   assert.equal(await page.locator('body.calendar-active').count(),0,'other pages retain normal appearance');
   assert.equal(await page.locator('.task-table tbody tr').count(),10);
   await page.getByRole('searchbox',{name:'搜索任务',exact:true}).fill('日程事项 10');
@@ -112,7 +112,7 @@ try {
     for(const value of ['month','week','day']) {
       await mode(value);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > innerWidth),false,`${width} ${value}`);
-      assert.ok(await page.locator('.ios-calendar-footer').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight), 'footer must stay visible');
+      assert.ok(await page.locator('.calendar-view-row').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight), 'view switch must stay visible');
       if(value!=='month') assert.equal(await page.locator('.timeline-item').count(),10);
     }
     await page.locator('[data-task-view="list"]').click();
@@ -132,7 +132,7 @@ try {
   await mode('month');
   assert.equal(await page.locator('.calendar-day').count(),42,'six-row months are complete');
   await page.locator('[data-day="2026-08-31"]').scrollIntoViewIfNeeded();
-  assert.ok(await page.locator('.ios-calendar-footer').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight),'short screen retains today and date controls');
+  assert.ok(await page.locator('.calendar-today-button').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight),'short screen retains today and view controls');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.locator('[data-day="2026-08-31"]').click();
   await page.locator('[data-mode=day]').click();
@@ -176,7 +176,7 @@ try {
     await page.setViewportSize(size);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.locator('.calendar-selected-task[data-id=week-long]').scrollIntoViewIfNeeded();
-    assert.ok(await page.locator('.ios-calendar-footer').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight));
+    assert.ok(await page.locator('.calendar-view-row').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight));
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({passed:true,checks:['首页重点隐私与详情','原配色、农历与起止日期连续任务条','月日切换与日期跳转','全天日志与24小时时间线、同小时多任务','任务搜索、筛选及新建日期','跨周跨月、重叠任务、包含起止日与隐私、多种尺寸']},null,2));

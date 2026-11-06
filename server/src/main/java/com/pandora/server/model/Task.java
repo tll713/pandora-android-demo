@@ -35,6 +35,9 @@ public class Task {
     @Column(nullable = false)
     private Boolean deleted = false;
 
+    @Column(name = "tag_id", length = 40)
+    private String tagId;
+
     @OneToMany(mappedBy = "task", cascade = CascadeType.PERSIST, fetch = FetchType.EAGER)
     private List<TaskOwner> owners = new ArrayList<>();
 
@@ -74,6 +77,8 @@ public class Task {
     public void setRevision(Integer revision) { this.revision = revision; }
     public Boolean getDeleted() { return deleted; }
     public void setDeleted(Boolean deleted) { this.deleted = deleted; }
+    public String getTagId() { return tagId; }
+    public void setTagId(String tagId) { this.tagId = tagId; }
     public List<TaskOwner> getOwners() { return owners; }
     public void setOwners(List<TaskOwner> owners) { this.owners = owners; }
     public List<TaskHistory> getHistory() { return history; }

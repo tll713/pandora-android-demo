@@ -27,6 +27,10 @@ public class ApiController {
     private final com.pandora.server.repository.TaskHistoryRepository taskHistoryRepository;
     private final com.pandora.server.repository.ChangeRequestRepository changeRequestRepository;
     private final com.pandora.server.repository.WorkLogRepository workLogRepository;
+    private final com.pandora.server.repository.TagRepository tagRepository;
+    private final com.pandora.server.repository.LogCommentRepository logCommentRepository;
+    private final TodoService todoService;
+    private final OperationLogService operationLogService;
 
     public ApiController(AuthService authService, UserService userService, TaskService taskService,
                          LogService logService, AnnouncementService announcementService, HighlightService highlightService,
@@ -35,7 +39,10 @@ public class ApiController {
                          com.pandora.server.repository.TaskOwnerRepository taskOwnerRepository,
                          com.pandora.server.repository.TaskHistoryRepository taskHistoryRepository,
                          com.pandora.server.repository.ChangeRequestRepository changeRequestRepository,
-                         com.pandora.server.repository.WorkLogRepository workLogRepository) {
+                         com.pandora.server.repository.WorkLogRepository workLogRepository,
+                         com.pandora.server.repository.TagRepository tagRepository,
+                         com.pandora.server.repository.LogCommentRepository logCommentRepository,
+                         TodoService todoService, OperationLogService operationLogService) {
         this.authService = authService;
         this.userService = userService;
         this.taskService = taskService;
@@ -48,6 +55,24 @@ public class ApiController {
         this.taskHistoryRepository = taskHistoryRepository;
         this.changeRequestRepository = changeRequestRepository;
         this.workLogRepository = workLogRepository;
+        this.tagRepository = tagRepository;
+        this.logCommentRepository = logCommentRepository;
+        this.todoService = todoService;
+        this.operationLogService = operationLogService;
+    }
+
+    /** 记录操作流水，失败不影响主流程。 */
+    private void audit(User actor, String action, String target, String summary) {
+        if (actor == null) return;
+        try {
+            operationLogService.record(actor.getId(), actor.getName(), action, target, summary);
+        } catch (RuntimeException ignored) {
+            // 审计失败不应阻断业务操作
+        }
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     // ============ 认证 ============
@@ -61,6 +86,7 @@ public class ApiController {
         }
         try {
             AuthService.LoginResult result = authService.login(identifier, password);
+            audit(result.user(), "登录", "工作台", "登录潘多拉工作台");
             return ResponseEntity.ok(Map.of(
                 "token", result.token(),
                 "user", profileToMap(result.user())
@@ -140,6 +166,7 @@ public class ApiController {
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         try {
             userService.changePassword(user, body.get("currentPassword"), body.get("newPassword"));
+            audit(user, "修改密码", "账号", "修改了自己的登录密码");
             return ResponseEntity.ok(Map.of("message", "密码已修改，请重新登录"));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -181,11 +208,59 @@ public class ApiController {
         db.put("pins", Map.of(user.getId(), pins));
         db.put("members", visibleUsers.stream().map(this::userToMap).collect(Collectors.toList()));
         db.put("allowedAssignees", allowedAssignees.stream().map(this::userToMap).collect(Collectors.toList()));
+        db.put("tags", tagRepository.findAll().stream().map(this::tagToMap).collect(Collectors.toList()));
+        db.put("todos", todoService.listOwn(user.getId()).stream().map(this::todoToMap).collect(Collectors.toList()));
 
         return ResponseEntity.ok(Map.of(
             "user", profileToMap(user),
             "db", db
         ));
+    }
+
+    // ============ 每日事项 ============
+
+    @PostMapping("/todos")
+    public ResponseEntity<?> createTodo(@AuthenticationPrincipal UserDetails ud, @RequestBody Map<String, Object> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        try {
+            DailyTodo todo = todoService.save(ud.getUsername(), body);
+            audit(userRepository.findById(ud.getUsername()).orElse(null), "新增每日事项", todo.getTitle(), "日期 " + todo.getDate());
+            return ResponseEntity.ok(todoToMap(todo));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/todos/{id}/toggle")
+    public ResponseEntity<?> toggleTodo(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        try {
+            DailyTodo todo = todoService.toggle(ud.getUsername(), id);
+            audit(userRepository.findById(ud.getUsername()).orElse(null), todo.isDone() ? "完成每日事项" : "恢复每日事项", todo.getTitle(), "日期 " + todo.getDate());
+            return ResponseEntity.ok(todoToMap(todo));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/todos/{id}")
+    public ResponseEntity<?> deleteTodo(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        try {
+            todoService.delete(ud.getUsername(), id);
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    private Map<String, Object> todoToMap(DailyTodo todo) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", todo.getId());
+        map.put("date", todo.getDate().toString());
+        map.put("title", todo.getTitle());
+        map.put("done", todo.isDone());
+        return map;
     }
 
     // ============ 任务 ============
@@ -200,6 +275,8 @@ public class ApiController {
         Map<String, Object> values = (Map<String, Object>) body.get("values");
         try {
             ChangeRequest req = taskService.requestTaskChange(user, kind, values, taskId);
+            audit(user, "提交任务申请", text(values == null ? null : values.get("title")),
+                    Map.of("create", "申请创建任务", "edit", "申请编辑任务", "delete", "申请删除任务").getOrDefault(kind, "提交任务变更"));
             return ResponseEntity.ok(requestToMap(req));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -216,6 +293,8 @@ public class ApiController {
         String reason = (String) body.get("reason");
         try {
             ChangeRequest req = taskService.reviewTaskChange(user, id, approve, reason);
+            audit(user, approve ? "通过任务申请" : "驳回任务申请", text(req.getTaskId()),
+                    approve ? "审核通过" : "审核驳回" + (reason == null || reason.isBlank() ? "" : "：" + reason));
             return ResponseEntity.ok(requestToMap(req));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -231,6 +310,7 @@ public class ApiController {
         String text = body.get("text");
         try {
             Task task = taskService.updateTaskDetail(user, id, text);
+            audit(user, "记录任务进展", task.getTitle(), text == null ? "更新进展" : text);
             return ResponseEntity.ok(taskToMap(task));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -244,6 +324,7 @@ public class ApiController {
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         try {
             Task task = taskService.completeTask(user, id);
+            audit(user, "完成任务", task.getTitle(), "任务已标记为已完成");
             return ResponseEntity.ok(taskToMap(task));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -274,6 +355,7 @@ public class ApiController {
         Map<String, Object> values = (Map<String, Object>) body.get("values");
         try {
             WorkLog log = logService.saveLog(user, values, logId);
+            audit(user, logId == null || logId.isBlank() ? "写工作日志" : "编辑工作日志", log.getTitle(), log.getDate() + " 的工作日志");
             return ResponseEntity.ok(logToMap(log));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -318,6 +400,7 @@ public class ApiController {
                     body.get("gender"), body.get("idNumber"), body.get("department"), body.get("role"));
             Map<String, Object> result = new HashMap<>(adminUserToMap(created.user()));
             result.put("temporaryPassword", created.temporaryPassword());
+            audit(user, "创建成员", created.user().getName(), created.user().getDepartment() + " · " + created.user().getRole());
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -346,6 +429,7 @@ public class ApiController {
         if (actor.getRole() != User.Role.ADMIN) return ResponseEntity.status(403).body(Map.of("error", "只有管理员可以维护账号"));
         try {
             userService.resetPassword(actor, id, body.get("password"));
+            audit(actor, "重置密码", userRepository.findById(id).map(User::getName).orElse(id), "管理员重置了该成员的登录密码");
             return ResponseEntity.ok(Map.of("message", "密码已重置，原登录状态已失效"));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -384,6 +468,28 @@ public class ApiController {
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "无权限"));
         return ResponseEntity.ok(workLogRepository.findAll().stream().map(this::logToMap).collect(Collectors.toList()));
+    }
+
+    /** 系统日志：全体成员的操作流水（登录、写日志、评价日志、任务处理、审核等）。 */
+    @GetMapping("/admin/operations")
+    public ResponseEntity<?> adminOperations(@AuthenticationPrincipal UserDetails ud,
+                                             @RequestParam(required = false) String actorId) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "无权限"));
+        return ResponseEntity.ok(operationLogService.recentOf(actorId).stream().map(this::operationToMap).collect(Collectors.toList()));
+    }
+
+    private Map<String, Object> operationToMap(OperationLog log) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", log.getId());
+        map.put("at", log.getAt() == null ? null : log.getAt().toString());
+        map.put("actor", log.getActorId());
+        map.put("actorName", log.getActorName());
+        map.put("action", log.getAction());
+        map.put("target", log.getTarget());
+        map.put("summary", log.getSummary());
+        return map;
     }
 
     @PostMapping("/admin/announcements")
@@ -478,6 +584,7 @@ public class ApiController {
         m.put("createdAt", t.getCreatedAt().toString());
         m.put("completedAt", t.getCompletedAt() != null ? t.getCompletedAt().toString() : null);
         m.put("revision", t.getRevision());
+        m.put("tagId", t.getTagId());
         m.put("owners", t.getOwners().stream().map(o -> o.getUser().getId()).collect(Collectors.toList()));
         m.put("ownerNames", t.getOwners().stream().map(o -> o.getUser().getName()).collect(Collectors.toList()));
         m.put("creatorName", userRepository.findById(t.getCreatorId()).map(User::getName).orElse(t.getCreatorId()));
@@ -523,6 +630,7 @@ public class ApiController {
         m.put("title", l.getTitle());
         m.put("content", l.getContent());
         m.put("taskId", l.getTaskId() != null ? l.getTaskId() : "");
+        m.put("tagId", l.getTagId());
         m.put("createdAt", l.getCreatedAt().toString());
         m.put("updatedAt", l.getUpdatedAt().toString());
         m.put("versions", l.getVersions() != null ? l.getVersions().stream().map(v -> {
@@ -545,6 +653,164 @@ public class ApiController {
         m.put("category", a.getCategory());
         m.put("date", a.getDate().toString());
         m.put("pinned", a.isPinned());
+        return m;
+    }
+
+    // ============ 日志评论 ============
+
+    @GetMapping("/logs/{id}/comments")
+    public ResponseEntity<?> logComments(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        WorkLog log = workLogRepository.findById(id).orElse(null);
+        if (log == null) return ResponseEntity.badRequest().body(Map.of("error", "日志不存在"));
+        // 创始人/管理员可看所有人，部门负责人只看本部门，员工只能看自己的
+        if (!logService.canViewLog(user, log.getAuthorId()))
+            return ResponseEntity.status(403).body(Map.of("error", "无权查看"));
+        List<Map<String, Object>> comments = logCommentRepository.findByLogIdOrderByCreatedAtDesc(id).stream().map(c -> {
+            Map<String, Object> cm = new HashMap<>();
+            cm.put("id", c.getId());
+            cm.put("authorId", c.getAuthorId());
+            cm.put("authorName", userRepository.findById(c.getAuthorId()).map(User::getName).orElse(c.getAuthorId()));
+            cm.put("content", c.getContent());
+            cm.put("createdAt", c.getCreatedAt());
+            return cm;
+        }).collect(Collectors.toList());
+        return ResponseEntity.ok(comments);
+    }
+
+    @PostMapping("/logs/{id}/comments")
+    public ResponseEntity<?> addLogComment(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                            @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        WorkLog log = workLogRepository.findById(id).orElse(null);
+        if (log == null) return ResponseEntity.badRequest().body(Map.of("error", "日志不存在"));
+        // 创始人/管理员可评论所有人，部门负责人可评论本部门，团队长可评论本部门员工
+        if (!logService.canViewLog(user, log.getAuthorId()))
+            return ResponseEntity.status(403).body(Map.of("error", "只能评论权限范围内的日志"));
+        // 任何人都不能评论自己的日志
+        if (log.getAuthorId().equals(user.getId()))
+            return ResponseEntity.status(403).body(Map.of("error", "不能评论自己的日志"));
+        try {
+            String content = body.get("content");
+            if (content == null || content.trim().isEmpty()) throw new IllegalArgumentException("评论内容不能为空");
+            if (content.trim().length() > 1000) throw new IllegalArgumentException("评论不能超过 1000 字");
+            com.pandora.server.model.LogComment c = new com.pandora.server.model.LogComment();
+            c.setId("lcomment-" + UUID.randomUUID().toString().substring(0, 8));
+            c.setLogId(id);
+            c.setAuthorId(user.getId());
+            c.setContent(content.trim());
+            logCommentRepository.save(c);
+            audit(user, "评价日志", log.getTitle() + " · " + log.getDate(), content.trim());
+            return ResponseEntity.ok(Map.of("ok", true, "id", c.getId()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ============ Tags ============
+
+    @GetMapping("/tags")
+    public ResponseEntity<?> tags() {
+        return ResponseEntity.ok(tagRepository.findAll().stream().map(this::tagToMap).collect(Collectors.toList()));
+    }
+
+    /** 管理端标签列表：附带每个标签被多少任务使用。 */
+    @GetMapping("/admin/tags")
+    public ResponseEntity<?> adminTags(@AuthenticationPrincipal UserDetails ud) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "只有系统管理员或创始人可以维护标签"));
+        return ResponseEntity.ok(tagRepository.findAll().stream().map(this::adminTagToMap).collect(Collectors.toList()));
+    }
+
+    @PostMapping("/admin/tags")
+    public ResponseEntity<?> adminCreateTag(@AuthenticationPrincipal UserDetails ud,
+                                             @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "只有系统管理员或创始人可以新建标签"));
+        try {
+            String name = body.get("name");
+            String color = body.get("color");
+            String description = body.get("description");
+            if (name == null || name.trim().isEmpty()) throw new IllegalArgumentException("标签名称不能为空");
+            if (name.length() > 40) throw new IllegalArgumentException("标签名称不能超过 40 字");
+            if (color == null || !color.trim().matches("^#[0-9a-fA-F]{6}$")) throw new IllegalArgumentException("请选择有效的标签颜色");
+            String id = body.get("id");
+            if (id == null || id.trim().isEmpty()) {
+                id = "tag-" + UUID.randomUUID().toString().substring(0, 8);
+            }
+            if (tagRepository.existsById(id)) throw new IllegalArgumentException("标签 ID 已存在");
+            Tag tag = new Tag();
+            tag.setId(id);
+            tag.setName(name.trim());
+            tag.setColor(color.trim().toLowerCase());
+            tag.setUrgency(body.get("urgency") == null ? "NORMAL" : body.get("urgency").trim().toUpperCase());
+            tag.setDescription(description != null ? description.trim() : "");
+            Tag saved = tagRepository.save(tag);
+            audit(user, "新建任务标签", saved.getName(), saved.getColor() + " · " + (saved.getDescription() == null ? "" : saved.getDescription()));
+            return ResponseEntity.ok(adminTagToMap(saved));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/admin/tags/{id}")
+    public ResponseEntity<?> adminUpdateTag(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                             @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "只有系统管理员或创始人可以编辑标签"));
+        try {
+            Tag tag = tagRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("标签不存在"));
+            String name = body.get("name");
+            String color = body.get("color");
+            String description = body.get("description");
+            if (color != null && !color.trim().isEmpty()) {
+                if (!color.trim().matches("^#[0-9a-fA-F]{6}$")) throw new IllegalArgumentException("请选择有效的标签颜色");
+                tag.setColor(color.trim().toLowerCase());
+            }
+            if (name != null && !name.trim().isEmpty()) {
+                if (name.length() > 40) throw new IllegalArgumentException("标签名称不能超过 40 字");
+                tag.setName(name.trim());
+            }
+            if (description != null) tag.setDescription(description.trim());
+            Tag saved = tagRepository.save(tag);
+            audit(user, "编辑任务标签", saved.getName(), saved.getColor() + " · " + (saved.getDescription() == null ? "" : saved.getDescription()));
+            return ResponseEntity.ok(adminTagToMap(saved));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/admin/tags/{id}")
+    public ResponseEntity<?> adminDeleteTag(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "只有系统管理员或创始人可以删除标签"));
+        Tag tag = tagRepository.findById(id).orElse(null);
+        if (tag == null) return ResponseEntity.badRequest().body(Map.of("error", "标签不存在"));
+        int cleared = taskRepository.clearTag(id);
+        tagRepository.deleteById(id);
+        audit(user, "删除任务标签", tag.getName(), cleared > 0 ? "已解除 " + cleared + " 个任务的标签" : "该标签未被任务使用");
+        return ResponseEntity.ok(Map.of("ok", true, "cleared", cleared));
+    }
+
+    private Map<String, Object> adminTagToMap(Tag t) {
+        Map<String, Object> m = new HashMap<>(tagToMap(t));
+        m.put("usage", taskRepository.countByTagId(t.getId()));
+        return m;
+    }
+
+    private Map<String, Object> tagToMap(Tag t) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", t.getId());
+        m.put("name", t.getName());
+        m.put("color", t.getColor());
+        m.put("description", t.getDescription());
+        m.put("createdAt", t.getCreatedAt());
         return m;
     }
 

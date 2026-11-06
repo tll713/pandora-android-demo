@@ -18,16 +18,18 @@ public class TaskService {
     private final ChangeRequestRepository changeRequestRepository;
     private final UserRepository userRepository;
     private final PinRepository pinRepository;
+    private final TagRepository tagRepository;
 
     public TaskService(TaskRepository taskRepository, TaskOwnerRepository taskOwnerRepository,
                        TaskHistoryRepository taskHistoryRepository, ChangeRequestRepository changeRequestRepository,
-                       UserRepository userRepository, PinRepository pinRepository) {
+                       UserRepository userRepository, PinRepository pinRepository, TagRepository tagRepository) {
         this.taskRepository = taskRepository;
         this.taskOwnerRepository = taskOwnerRepository;
         this.taskHistoryRepository = taskHistoryRepository;
         this.changeRequestRepository = changeRequestRepository;
         this.userRepository = userRepository;
         this.pinRepository = pinRepository;
+        this.tagRepository = tagRepository;
     }
 
     // ============ 查询 ============
@@ -143,6 +145,11 @@ public class TaskService {
         String detail = (String) values.get("detail");
         if (detail != null && detail.trim().length() > 2000) throw new IllegalArgumentException("任务说明不能超过 2000 个字");
         detail = detail == null ? "" : detail.trim();
+        String tagId = values.containsKey("tagId") ? (String) values.get("tagId")
+                : existing != null ? existing.getTagId() : null;
+        tagId = tagId == null || tagId.isBlank() ? null : tagId.trim();
+        if (tagId != null && !tagRepository.existsById(tagId))
+            throw new IllegalArgumentException("请选择有效的任务标签");
 
         Map<String, Object> result = new HashMap<>();
         result.put("title", title);
@@ -151,6 +158,7 @@ public class TaskService {
         result.put("dueAt", dueAt);
         result.put("priority", priority);
         result.put("detail", detail);
+        result.put("tagId", tagId);
         return result;
     }
 
@@ -188,6 +196,7 @@ public class TaskService {
                 task.setDetail((String) after.get("detail"));
                 task.setPriority(Task.Priority.valueOf(((String) after.get("priority")).toUpperCase()));
                 applyTaskDates(task, after);
+                applyTaskTag(task, after);
                 task.setStatus(Task.Status.TODO);
                 task.setCreatorId(req.getProposerId());
                 task.setRevision(1);
@@ -209,6 +218,7 @@ public class TaskService {
                     task.setDetail((String) after.get("detail"));
                     task.setPriority(Task.Priority.valueOf(((String) after.get("priority")).toUpperCase()));
                     applyTaskDates(task, after);
+                    applyTaskTag(task, after);
                     task.setRevision(task.getRevision() + 1);
                     // 先保存 task 确保状态更新，再替换 owners
                     taskRepository.save(task);
@@ -287,6 +297,11 @@ public class TaskService {
 
     // ============ 辅助 ============
 
+    private void applyTaskTag(Task task, Map<String, Object> after) {
+        // Older pending requests omit tagId and must retain the existing tag.
+        if (after.containsKey("tagId")) task.setTagId((String) after.get("tagId"));
+    }
+
     private void applyTaskDates(Task task, Map<String, Object> after) {
         LocalDateTime due = LocalDateTime.parse((String) after.get("dueAt"));
         LocalDateTime start = after.get("startAt") != null ? LocalDateTime.parse((String) after.get("startAt"))
@@ -317,6 +332,7 @@ public class TaskService {
         m.put("status", task.getStatus().name().toLowerCase());
         m.put("creator", task.getCreatorId());
         m.put("revision", task.getRevision());
+        m.put("tagId", task.getTagId());
         return m;
     }
 

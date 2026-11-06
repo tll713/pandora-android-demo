@@ -24,18 +24,52 @@ public class LogService {
     }
 
     public List<WorkLog> getVisibleLogs(User user) {
-        return workLogRepository.findByAuthorId(user.getId());
+        if (user.isGlobal()) return workLogRepository.findAll();
+        if (user.getRole() == User.Role.EMPLOYEE) return workLogRepository.findByAuthorId(user.getId());
+        Set<String> allowedAuthorIds = visibleAuthorIds(user);
+        return workLogRepository.findAll().stream()
+                .filter(l -> allowedAuthorIds.contains(l.getAuthorId()))
+                .collect(Collectors.toList());
     }
 
     public List<WorkLog> getRecentLogs(User user, int days) {
         LocalDate end = LocalDate.now();
         LocalDate start = end.minusDays(days - 1);
-        return workLogRepository.findByAuthorIdAndDateBetween(user.getId(), start, end);
+        if (user.isGlobal()) return workLogRepository.findByDateBetween(start, end);
+        if (user.getRole() == User.Role.EMPLOYEE) return workLogRepository.findByAuthorIdAndDateBetween(user.getId(), start, end);
+        Set<String> allowedAuthorIds = visibleAuthorIds(user);
+        return workLogRepository.findByDateBetween(start, end).stream()
+                .filter(l -> allowedAuthorIds.contains(l.getAuthorId()))
+                .collect(Collectors.toList());
     }
 
     public List<WorkLog> getHistoryLogs(User user, LocalDate before) {
         List<WorkLog> all = getVisibleLogs(user);
         return all.stream().filter(l -> l.getDate().isBefore(before)).collect(Collectors.toList());
+    }
+
+    // 创始人/管理员可查看所有人日志；部门负责人只看本部门；团队长只看本部门员工；员工只看自己
+    public boolean canViewLog(User user, String authorId) {
+        if (user == null || authorId == null) return false;
+        if (user.isGlobal() || user.getId().equals(authorId)) return true;
+        if (user.getRole() == User.Role.EMPLOYEE) return false;
+        return userRepository.findById(authorId)
+                .map(author -> Objects.equals(user.getDepartment(), author.getDepartment())
+                        && (user.getRole() != User.Role.TEAM_LEAD || author.getRole() == User.Role.EMPLOYEE))
+                .orElse(false);
+    }
+
+    // 团队长只纳入本部门员工，不包含部门负责人和其他团队长
+    private Set<String> visibleAuthorIds(User user) {
+        Set<String> ids = new HashSet<>();
+        ids.add(user.getId());
+        boolean employeesOnly = user.getRole() == User.Role.TEAM_LEAD;
+        userRepository.findAll().stream()
+                .filter(member -> Objects.equals(user.getDepartment(), member.getDepartment()))
+                .filter(member -> !employeesOnly || member.getRole() == User.Role.EMPLOYEE)
+                .map(User::getId)
+                .forEach(ids::add);
+        return ids;
     }
 
     @Transactional

@@ -1,9 +1,9 @@
 {
-  "apk": "pandora-demo-0.4.4.apk",
-  "version": "0.4.4",
-  "versionCode": 16,
-  "sha256": "cb5a47b6c5e6966342d8185280a0b607f1e5cdf357e603bc59babb0e62a8c438",
-  "bytes": 62330,
+  "apk": "pandora-demo-0.5.0.apk",
+  "version": "0.5.0",
+  "versionCode": 33,
+  "sha256": "f6b8196f1f5bd8978c93c6bc9993cae3811a98a6bb7b477c7c83fe12dc4f77b4",
+  "bytes": 70522,
   "minimumAndroid": "8.0 (API 26)",
   "targetSdk": 35,
   "embeddedAssetsMatchSource": true

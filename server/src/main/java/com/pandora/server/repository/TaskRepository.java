@@ -2,14 +2,24 @@ package com.pandora.server.repository;
 
 import com.pandora.server.model.Task;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, String> {
     List<Task> findByDeletedFalse();
     List<Task> findByDeletedFalseAndCreatorId(String creatorId);
+
+    long countByTagId(String tagId);
+
+    /** 删除标签时把任务的标签引用清空，避免留下悬空的 tag_id。 */
+    @Modifying
+    @Transactional
+    @Query("UPDATE Task t SET t.tagId = null WHERE t.tagId = :tagId")
+    int clearTag(@Param("tagId") String tagId);
     
     @Query("SELECT t FROM Task t JOIN t.owners o WHERE t.deleted = false AND o.user.id = :userId")
     List<Task> findVisibleToUser(@Param("userId") String userId);

@@ -185,3 +185,75 @@ SET @pandora_ddl = IF(
 PREPARE pandora_migration FROM @pandora_ddl;
 EXECUTE pandora_migration;
 DEALLOCATE PREPARE pandora_migration;
+
+-- Tags table
+CREATE TABLE IF NOT EXISTS tags (
+  id VARCHAR(40) PRIMARY KEY,
+  name VARCHAR(40) NOT NULL,
+  color VARCHAR(20) NOT NULL,
+  description VARCHAR(200),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add tag_id to tasks
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tasks' AND column_name = 'tag_id') = 0,
+  'ALTER TABLE tasks ADD COLUMN tag_id VARCHAR(40)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+-- Add tag_id to work_logs
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'work_logs' AND column_name = 'tag_id') = 0,
+  'ALTER TABLE work_logs ADD COLUMN tag_id VARCHAR(40)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+-- Log comments table
+CREATE TABLE IF NOT EXISTS log_comments (
+  id VARCHAR(40) PRIMARY KEY,
+  log_id VARCHAR(40) NOT NULL,
+  author_id VARCHAR(40) NOT NULL,
+  content VARCHAR(1000) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_log_comments_log (log_id)
+);
+
+-- Daily personal todos
+CREATE TABLE IF NOT EXISTS daily_todos (
+  id VARCHAR(40) PRIMARY KEY,
+  owner_id VARCHAR(30) NOT NULL,
+  date DATE NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  done BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_daily_todos_owner_date (owner_id, date)
+);
+
+-- 操作流水：系统日志页按时间线展示员工的所有操作
+-- Remember initialized demo checklists independently of user-editable todo rows.
+CREATE TABLE IF NOT EXISTS demo_activity_days (
+  id VARCHAR(50) PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS operation_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  at DATETIME NOT NULL,
+  actor_id VARCHAR(30) NOT NULL,
+  actor_name VARCHAR(30) NOT NULL,
+  action VARCHAR(40) NOT NULL,
+  target VARCHAR(160) NOT NULL DEFAULT '',
+  summary VARCHAR(600) NOT NULL DEFAULT '',
+  INDEX idx_operation_at (at),
+  INDEX idx_operation_actor (actor_id)
+);
+
+-- 标签按紧急程度着色：URGENT / IMPORTANT / NORMAL / LONGTERM
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tags' AND column_name = 'urgency') = 0,
+  'ALTER TABLE tags ADD COLUMN urgency VARCHAR(16) NOT NULL DEFAULT ''NORMAL''', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;

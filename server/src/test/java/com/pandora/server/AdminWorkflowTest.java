@@ -38,6 +38,7 @@ class AdminWorkflowTest {
     @Autowired PasswordEncoder encoder;
     @Autowired ObjectMapper json;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.pandora.server.repository.TagRepository tags;
     @MockBean DataSeeder seeder;
     private String admin, founder, employee;
 
@@ -140,6 +141,50 @@ class AdminWorkflowTest {
         JsonNode retry = call("POST", "/api/tasks/requests", admin, Map.of("kind", "delete", "taskId", taskId));
         call("POST", "/api/tasks/requests/" + retry.get("id").asText() + "/review", founder, Map.of("approve", true));
         assertFalse(call("GET", "/api/admin/tasks", admin, null).findValuesAsText("id").contains(taskId));
+    }
+
+    @Test
+    void taskTagsPersistThroughApprovalAndCanBeChangedOrCleared() throws Exception {
+        for (String id : new String[]{"tag-design", "tag-meeting"}) {
+            var tag = new com.pandora.server.model.Tag();
+            tag.setId(id); tag.setName(id); tag.setColor("#9b59b6"); tags.save(tag);
+        }
+        var values = new java.util.HashMap<String, Object>(Map.of("title", "标签任务", "owners", new String[]{"employee"},
+                "dueAt", "2027-01-10T18:00", "priority", "high", "detail", "标签应随审核生效", "tagId", "tag-design"));
+        JsonNode request = call("POST", "/api/tasks/requests", admin, Map.of("kind", "create", "values", values));
+        String taskId = request.get("taskId").asText();
+        assertEquals("tag-design", request.path("after").path("tagId").asText());
+        call("POST", "/api/tasks/requests/" + request.get("id").asText() + "/review", founder, Map.of("approve", true));
+        assertEquals("tag-design", jdbc.queryForObject("SELECT tag_id FROM tasks WHERE id=?", String.class, taskId));
+        JsonNode workspaceTask = call("GET", "/api/workspace", employee, null).path("db").path("tasks")
+                .findParents("id").stream().filter(t -> taskId.equals(t.path("id").asText())).findFirst().orElseThrow();
+        assertEquals("tag-design", workspaceTask.path("tagId").asText());
+
+        values.put("tagId", "tag-meeting");
+        JsonNode edit = call("POST", "/api/tasks/requests", admin, Map.of("kind", "edit", "taskId", taskId, "values", values));
+        assertEquals("tag-design", edit.path("before").path("tagId").asText());
+        assertEquals("tag-design", jdbc.queryForObject("SELECT tag_id FROM tasks WHERE id=?", String.class, taskId));
+        call("POST", "/api/tasks/requests/" + edit.get("id").asText() + "/review", founder, Map.of("approve", true));
+        assertEquals("tag-meeting", jdbc.queryForObject("SELECT tag_id FROM tasks WHERE id=?", String.class, taskId));
+
+        values.remove("tagId");
+        JsonNode legacy = call("POST", "/api/tasks/requests", admin, Map.of("kind", "edit", "taskId", taskId, "values", values));
+        assertEquals("tag-meeting", legacy.path("after").path("tagId").asText());
+        var oldSnapshot = legacy.path("after").deepCopy();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) oldSnapshot).remove("tagId");
+        jdbc.update("UPDATE change_requests SET after_json=? WHERE id=?", json.writeValueAsString(oldSnapshot), legacy.get("id").asText());
+        call("POST", "/api/tasks/requests/" + legacy.get("id").asText() + "/review", founder, Map.of("approve", true));
+        assertEquals("tag-meeting", jdbc.queryForObject("SELECT tag_id FROM tasks WHERE id=?", String.class, taskId));
+
+        values.put("tagId", "");
+        JsonNode clear = call("POST", "/api/tasks/requests", admin, Map.of("kind", "edit", "taskId", taskId, "values", values));
+        assertTrue(clear.path("after").path("tagId").isNull());
+        call("POST", "/api/tasks/requests/" + clear.get("id").asText() + "/review", founder, Map.of("approve", true));
+        assertNull(jdbc.queryForObject("SELECT tag_id FROM tasks WHERE id=?", String.class, taskId));
+
+        values.put("tagId", "tag-does-not-exist");
+        mvc.perform(post("/api/tasks/requests").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("kind", "create", "values", values)))).andExpect(status().isBadRequest());
     }
 
     @Test

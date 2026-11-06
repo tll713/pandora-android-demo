@@ -12,6 +12,7 @@ export const STORAGE_KEY = 'pandora.workspace.v2';
 export const userById = id => USERS.find(u => u.id === id);
 export const isManager = u => Boolean(u && u.role !== '员工' && u.role !== 'EMPLOYEE');
 export const isGlobal = u => ['管理员', '创始人', 'ADMIN', 'FOUNDER'].includes(u?.role);
+export const isSupervisor = u => Boolean(u && u.role !== '员工' && u.role !== 'EMPLOYEE');
 export function hydrateUsers(db) {
   for (const u of db.members || []) if (!userById(u.id)) USERS.push(u);
 }
@@ -33,6 +34,18 @@ export function isValidDate(v) {
 export function isValidMinute(v) {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v || '') && isValidDate(v.slice(0, 10)) && Number(v.slice(11, 13)) < 24 && Number(v.slice(14)) < 60;
 }
+export const isDeptManager = u => ['部门负责人', 'DEPT_MANAGER'].includes(u?.role);
+export const isTeamLead = u => ['团队长', 'TEAM_LEAD'].includes(u?.role);
+const isEmployee = u => ['员工', 'EMPLOYEE'].includes(u?.role);
+// 日志可见范围：创始人/管理员看全部；部门负责人看本部门；团队长只看本部门员工；员工只看自己
+export function canViewLog(u, authorId) {
+  const author = userById(authorId);
+  if (!u || !author) return false;
+  if (isGlobal(u) || u.id === authorId) return true;
+  if (isDeptManager(u)) return author.department === u.department;
+  if (isTeamLead(u)) return author.department === u.department && isEmployee(author);
+  return false;
+}
 export function canSeeUser(u, ownerId) {
   const owner = userById(ownerId);
   if (!u || !owner) return false;
@@ -43,7 +56,7 @@ export const canSeeTask = (u, t) => Boolean(t && !t.deleted && (t.owners.include
 export const canWorkOnTask = (u, t) => Boolean(canSeeTask(u, t) && t.owners.includes(u.id));
 export const canManageTask = (u, t) => Boolean(isManager(u) && canSeeTask(u, t) && t.owners.every(id => canSeeUser(u, id)));
 export const visibleTasks = (db, u) => db.tasks.filter(t => canSeeTask(u, t));
-export const visibleLogs = (db, u) => db.logs.filter(l => l.author === u?.id);
+export const visibleLogs = (db, u) => (db.logs || []).filter(l => canViewLog(u, l.author));
 export const recentLogs = (db, u, today = dateKey()) => visibleLogs(db, u).filter(l => l.date >= dayOffset(-6, today) && l.date <= today);
 export const allowedAssignees = u => USERS.filter(v => v.role !== '管理员' && v.role !== 'ADMIN' && canSeeUser(u, v.id));
 export const isOverdue = (t, now = minuteKey()) => t.dueAt < now && t.status !== 'done';

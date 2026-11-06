@@ -30,8 +30,8 @@ public final class MainActivity extends Activity {
     private static final int AVATAR_REQUEST = 101;
     private static final String ORIGIN = "appassets.androidplatform.net";
     private static final Set<String> FILES = new HashSet<>(Arrays.asList("index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/style.css", "src/mobile.css"));
-    // 模拟器通过 10.0.2.2 访问宿主机后端；真机调试时改为电脑局域网 IP
-    private static final String API_BASE = "http://10.152.248.160:8080/api";
+    // 后端地址（电脑的局域网 IP+端口），由应用注入页面。
+    private static final String API_BASE = "http://10.231.158.160:8080/api";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -77,15 +77,21 @@ public final class MainActivity extends Activity {
                 return false;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
-                if (isApi(req.getUrl())) return null;
-                if (!isLocal(req.getUrl())) return response(403, "Forbidden", "text/plain", "External requests disabled");
+                Uri url = req.getUrl();
+                // 本地资源由本应用提供；网络请求（后端 API）交给系统网络栈处理，
+                // 这样用户在登录页修改服务器地址后也能正常访问
+                if (!isLocal(url)) {
+                    String scheme = url.getScheme();
+                    if ("http".equals(scheme) || "https".equals(scheme)) return null;
+                    return response(403, "Forbidden", "text/plain", "External requests disabled");
+                }
                 String path = req.getUrl().getPath();
                 String file = path.equals("/") ? "index.html" : path.substring(1);
                 if (!FILES.contains(file)) return response(404, "Not Found", "text/plain", "Not found");
                 try {
                     String mime = file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html";
                     Map<String, String> headers = new HashMap<>();
-                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " + apiOrigin() + "; object-src 'none'; base-uri 'self'";
+                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https:; object-src 'none'; base-uri 'self'";
                     InputStream body;
                     if (file.equals("index.html")) {
                         // 在页面脚本执行前注入 API 基地址；nonce 保证 CSP 下仅这段内联脚本可执行
@@ -122,14 +128,6 @@ public final class MainActivity extends Activity {
             }
         } catch (Exception ignored) { }
         return fallback;
-    }
-    private static String apiOrigin() {
-        Uri api = Uri.parse(API_BASE);
-        return api.getScheme() + "://" + api.getAuthority();
-    }
-    private boolean isApi(Uri url) {
-        Uri api = Uri.parse(API_BASE);
-        return api.getScheme().equals(url.getScheme()) && api.getAuthority().equals(url.getAuthority());
     }
     private WebResourceResponse response(int status, String reason, String mime, String text) {
         return new WebResourceResponse(mime, "UTF-8", status, reason, new HashMap<>(), new ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
