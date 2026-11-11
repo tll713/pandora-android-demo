@@ -5,3 +5,4 @@ deliverables/*.zip
 deliverables/verification/*.png
 android/build/
 *.keystore
+output/playwright/

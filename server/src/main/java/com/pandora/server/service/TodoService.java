@@ -54,6 +54,19 @@ public class TodoService {
     }
 
     @Transactional
+    public DailyTodo move(String ownerId, String id, String dateValue) {
+        DailyTodo todo = own(ownerId, id);
+        LocalDate date;
+        try {
+            date = LocalDate.parse(dateValue);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("事项日期格式不正确");
+        }
+        todo.setDate(date);
+        return todoRepository.save(todo);
+    }
+
+    @Transactional
     public void delete(String ownerId, String id) {
         todoRepository.delete(own(ownerId, id));
     }

@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
     private static final String ORIGIN = "appassets.androidplatform.net";
     private static final Set<String> FILES = new HashSet<>(Arrays.asList("index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/style.css", "src/mobile.css"));
     // 后端地址（电脑的局域网 IP+端口），由应用注入页面。
-    private static final String API_BASE = "http://10.231.158.160:8080/api";
+    private static final String API_BASE = "http://10.17.147.160:8080/api";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -55,7 +55,7 @@ public final class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.4.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.5.7");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);

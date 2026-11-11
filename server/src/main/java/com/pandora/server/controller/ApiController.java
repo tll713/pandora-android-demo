@@ -243,6 +243,19 @@ public class ApiController {
         }
     }
 
+    @PutMapping("/todos/{id}/date")
+    public ResponseEntity<?> moveTodo(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                     @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        try {
+            DailyTodo todo = todoService.move(ud.getUsername(), id, body.get("date"));
+            audit(userRepository.findById(ud.getUsername()).orElse(null), "移动每日事项", todo.getTitle(), "日期 " + todo.getDate());
+            return ResponseEntity.ok(todoToMap(todo));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @DeleteMapping("/todos/{id}")
     public ResponseEntity<?> deleteTodo(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));

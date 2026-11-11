@@ -116,6 +116,9 @@ public class LogService {
         } else {
             taskId = "";
         }
+        String tagId = (String) values.get("tagId");
+        if (tagId != null && tagId.length() > 40) throw new IllegalArgumentException("日志标签格式不正确");
+        if (tagId != null && tagId.isBlank()) tagId = null;
 
         LocalDateTime at = LocalDateTime.now();
         if (existing != null) {
@@ -130,6 +133,7 @@ public class LogService {
             existing.setTitle(title);
             existing.setContent(content);
             existing.setTaskId(taskId);
+            existing.setTagId(tagId);
             existing.setUpdatedAt(at);
             return workLogRepository.save(existing);
         }
@@ -141,6 +145,7 @@ public class LogService {
         log.setTitle(title);
         log.setContent(content);
         log.setTaskId(taskId);
+        log.setTagId(tagId);
         return workLogRepository.save(log);
     }
 }

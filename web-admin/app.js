@@ -18,7 +18,6 @@
   const roles = {ADMIN:'管理员',FOUNDER:'创始人',DEPT_MANAGER:'部门负责人',TEAM_LEAD:'团队长',EMPLOYEE:'员工'};
   const pages = {
     users:['组织与账号','ORGANIZATION & ACCOUNTS','管理公司成员、部门与账号'],
-    tags:['任务标签','TASK TAGS','维护 App 任务使用的标签名称、配色与说明'],
     logs:['系统日志','SYSTEM LOGS','按时间线查看全体成员在 App 里的每一步操作'],
     highlights:['十大内容','TOP TEN HIGHLIGHTS','录入与维护 App 首页的公司事项、派发任务和个人事项']
   };
@@ -75,11 +74,11 @@
     state.loading=true; state.error=''; render();
     $('refresh-btn').disabled=true;
     try {
-      const [users,tags,highlights,tasks,operations]=await Promise.all([
-        api('/admin/users'),api('/admin/tags'),api('/admin/highlights'),api('/admin/tasks'),api('/admin/operations')
+      const [users,highlights,tasks,operations]=await Promise.all([
+        api('/admin/users'),api('/admin/highlights'),api('/admin/tasks'),api('/admin/operations')
       ]);
       if(session!==state.session || load!==state.load) return;
-      state.data={users,tags,highlights,tasks,operations};
+      state.data={users,highlights,tasks,operations};
       $('refresh-time').textContent='更新于 '+new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
     } catch(error) { if(session===state.session && load===state.load) state.error=error.message; }
     finally {
@@ -105,7 +104,7 @@
     const meta=pages[state.page];
     $('breadcrumb-title').textContent=meta[0]; $('page-title').textContent=meta[0]; $('page-kicker').textContent=meta[1]; $('page-description').textContent=meta[2];
     const primary=$('primary-action');
-    const primaryMap={users:['new-user','添加成员'],tags:['new-tag','新增标签'],highlights:['new-highlight','录入十大内容']};
+    const primaryMap={users:['new-user','添加成员'],highlights:['new-highlight','录入十大内容']};
     const next=primaryMap[state.page];
     primary.hidden=!next || (state.page==='users' && state.user.role!=='ADMIN');
     primary.disabled=state.loading || !!state.error || !state.data;
@@ -113,7 +112,7 @@
     if(state.loading) {$('page-content').innerHTML='<div class="loading-state"><span class="spinner"></span>正在加载管理数据…</div>';return;}
     if(state.error) {$('page-content').innerHTML='<section class="panel">'+empty('数据加载失败',state.error,'refresh','重新加载')+'</section>';return;}
     if(!state.data) return;
-    $('page-content').innerHTML=({users:usersPage,tags:tagsPage,logs:logsPage,highlights:highlightsPage})[state.page]();
+    $('page-content').innerHTML=({users:usersPage,logs:logsPage,highlights:highlightsPage})[state.page]();
   }
   function empty(title='暂无匹配结果',description='试试调整筛选条件，或稍后再来查看。',button='',label='') {
     return '<div class="empty-state"><div class="empty-icon">'+icon(state.page)+'</div><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p>'+(button?action(button,'',esc(label),'btn'):'')+'</div>';
@@ -178,20 +177,6 @@
     const o=(state.data.operations||[]).find(x=>String(x.id)===String(id));
     if(!o) return toast('记录不存在，请刷新数据',true);
     openDialog(o.action,detailGrid([['操作人',o.actorName],['操作类型',o.action],['操作对象',o.target||'无'],['时间',String(o.at||'').replace('T',' ').slice(0,19)]])+'<section class="detail-section"><h3>操作摘要</h3><div class="prose">'+esc(o.summary||'无')+'</div></section>','OPERATION');
-  }
-  const tagPresets=['#e74c3c','#e67e22','#f1c40f','#2ecc71','#1abc9c','#3498db','#9b59b6','#34495e','#e91e63','#7f8c8d'];
-  function tagsPage() {
-    const list=[...state.data.tags].filter(t=>searchMatch(t.name+' '+(t.description||''))).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
-    const p=paginated(list);
-    return '<div class="section-note">'+icon('info')+'每个标签都有自己的颜色，用于 App 里任务条与日历色块；没有选择标签的任务默认按「长期任务」显示浅色。系统管理员或创始人可以新建、改名、换色和删除，删除标签时会自动解除任务上的引用。'+'</div>'+
-      toolbar()+
-      table('任务标签',['标签','颜色','说明','使用任务','操作'],p.items.map(t=>cell('<span class="tag-chip"><i style="background:'+esc(t.color)+'"></i>'+esc(t.name)+'</span>')+cell('<span class="color-cell"><i style="background:'+esc(t.color)+'"></i>'+esc(t.color)+'</span>')+cell(esc(t.description||'—'))+cell(t.usage?t.usage+' 个任务':'未被使用')+cell('<div class="row-actions">'+action('edit-tag',t.id,'编辑')+action('delete-tag',t.id,'删除','row-link danger')+'</div>')),list.length,p.footer);
-  }
-  function tagForm(id='') {
-    const t=state.data.tags.find(x=>x.id===id);
-    openDialog(t?'编辑任务标签':'新增任务标签','<form id="tag-form"><div class="form-grid"><label>标签名称<input name="name" required maxlength="40" value="'+esc(t?.name||'')+'" placeholder="例如：紧急重要"></label><label>标签颜色<input name="color" type="color" required value="'+esc(t?.color||'#3498db')+'"></label><label class="full">说明<input name="description" maxlength="200" value="'+esc(t?.description||'')+'" placeholder="选填，说明这个标签用在什么任务上"></label><p class="form-hint full">颜色会用在 App 的任务条与日历色块上；没选标签的任务用统一的浅色表示「长期任务」。</p></div>'+
-      '<div class="color-presets">'+tagPresets.map(c=>'<button type="button" class="color-swatch" data-action="pick-color" data-id="'+c+'" style="background:'+c+'" aria-label="选择颜色 '+c+'"></button>').join('')+'</div>'+
-      formActions(t?'保存修改':'创建标签')+'</form>','TASK TAG',{type:'tag-form',id});
   }
   const boardKinds=[
     ['company','事件纪','App 首页「事件纪」按 01—10 顺序展示公司重要事项'],
@@ -302,17 +287,6 @@
       if(name.startsWith('go-')) return navigate(name.slice(3));
       if(!state.data) return;
       if(name==='new-user') return userForm();
-      if(name==='new-tag') return tagForm();
-      if(name==='edit-tag') return tagForm(id);
-      if(name==='delete-tag') {
-        const t=state.data.tags.find(x=>x.id===id);
-        return confirmAction('删除标签“'+t.name+'”？','删除后使用该标签的任务会失去标签配色，任务本身与进展不受影响。',()=>mutate(()=>api('/admin/tags/'+encodeURIComponent(id),{method:'DELETE'}),'标签已删除'),true);
-      }
-      if(name==='pick-color') {
-        const input=$('tag-form')?.elements.color;
-        if(input) input.value=id;
-        return;
-      }
       if(name==='pick-audience') {filters().audience=id; render(); return;}
       if(name==='new-highlight') {slotDraft=button.dataset.slot||filters().slot||'';return highlightForm();}
       if(name==='fill-slot') {slotDraft=button.dataset.slot||'';return highlightForm();}
@@ -352,7 +326,7 @@
   }
   document.addEventListener('submit',event=>{
     const form=event.target;
-    if(!['login-form','filter-form','user-form','password-form','highlight-form','tag-form','confirm-form'].includes(form.id)) return;
+    if(!['login-form','filter-form','user-form','password-form','highlight-form','confirm-form'].includes(form.id)) return;
     event.preventDefault();
     if(form.id==='login-form') return;
     if(state.busy) return;
@@ -363,10 +337,6 @@
       if(form.id==='highlight-form') {
         const body={kind:data.kind,audience:data.audience||'',position:Number(data.position),taskId:data.taskId||null,title:data.title.trim(),content:data.content.trim(),enabled:data.enabled==='on'};
         return void mutate(()=>api('/admin/highlights'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'十大内容已更新':'十大内容已保存');
-      }
-      if(form.id==='tag-form') {
-        const body={name:data.name.trim(),color:data.color,description:(data.description||'').trim()};
-        return void mutate(()=>api('/admin/tags'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'标签已更新':'标签已创建');
       }
       if(form.id==='user-form') {
         const body={name:data.name.trim(),phone:data.phone.trim(),gender:data.gender,idNumber:data.idNumber.trim(),department:data.department.trim(),role:data.role,enabled:data.enabled==='on'};

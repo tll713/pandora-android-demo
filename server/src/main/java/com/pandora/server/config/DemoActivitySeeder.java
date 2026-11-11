@@ -125,7 +125,9 @@ public class DemoActivitySeeder {
             }
             Map<LocalDate, List<DailyTodo>> plannedDays = todos.findByOwnerIdOrderByDateAscCreatedAtAsc(user.getId()).stream()
                     .collect(Collectors.groupingBy(DailyTodo::getDate));
-            for (int offset = -6; offset <= 3; offset++) {
+            // Keep the rest of this month populated, with at least three future days at month end.
+            int futureDays = Math.max(3, today.lengthOfMonth() - today.getDayOfMonth());
+            for (int offset = -6; offset <= futureDays; offset++) {
                 LocalDate day = today.plusDays(offset);
                 String dayId = user.getId() + "-" + day;
                 if (initializedDays.existsById(dayId)) continue;

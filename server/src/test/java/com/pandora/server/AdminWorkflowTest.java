@@ -46,6 +46,8 @@ class AdminWorkflowTest {
     void setup() {
         // Production schema.sql supplies this database-generated timestamp.
         jdbc.execute("ALTER TABLE tasks ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP");
+        jdbc.execute("ALTER TABLE work_logs ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP");
+        jdbc.execute("ALTER TABLE work_logs ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP");
         for (var role : new User.Role[]{User.Role.ADMIN, User.Role.FOUNDER, User.Role.EMPLOYEE}) {
             User u = new User();
             u.setId(role.name().toLowerCase()); u.setRole(role);
@@ -67,6 +69,40 @@ class AdminWorkflowTest {
         request.header("Authorization", "Bearer " + token);
         if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body));
         return json.readTree(mvc.perform(request).andExpect(status().isOk()).andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void todoReschedulingPersistsAndRejectsOtherOwnersAndInvalidDates() throws Exception {
+        String today = java.time.LocalDate.now().toString();
+        String nextMonth = java.time.LocalDate.now().plusMonths(1).withDayOfMonth(1).toString();
+        JsonNode todo = call("POST", "/api/todos", employee, Map.of("date", today, "title", "需要改期的事项"));
+        String path = "/api/todos/" + todo.get("id").asText();
+        call("POST", path + "/toggle", employee, null);
+        mvc.perform(put(path + "/date").header("Authorization", "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("date", nextMonth))))
+                .andExpect(status().isBadRequest());
+        mvc.perform(put(path + "/date").header("Authorization", "Bearer " + employee)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"date\":\"2026-02-30\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(put(path + "/date").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
+        JsonNode moved = call("PUT", path + "/date", employee, Map.of("date", nextMonth));
+        assertEquals(nextMonth, moved.get("date").asText());
+        assertTrue(moved.get("done").asBoolean());
+        JsonNode workspace = call("GET", "/api/workspace", employee, null);
+        assertTrue(java.util.stream.StreamSupport.stream(workspace.get("db").get("todos").spliterator(), false)
+                .anyMatch(item -> item.get("id").equals(todo.get("id")) && item.get("date").asText().equals(nextMonth)));
+    }
+
+    @Test
+    void dailyReportTagIsSavedAndCanBeClearedOnEdit() throws Exception {
+        String today = java.time.LocalDate.now().toString();
+        JsonNode log = call("POST", "/api/logs", employee, Map.of("values", Map.of("date", today,
+                "content", "【今日完成】\n完成工作\n\n【下一步计划】\n\n\n【问题与协助】", "tagId", "design")));
+        assertEquals("design", log.get("tagId").asText());
+        JsonNode edited = call("POST", "/api/logs", employee, Map.of("logId", log.get("id").asText(), "values",
+                Map.of("date", today, "content", "更新工作", "tagId", "")));
+        assertTrue(edited.get("tagId").isNull());
     }
 
     @Test

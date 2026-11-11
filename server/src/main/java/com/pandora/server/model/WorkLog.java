@@ -30,9 +30,11 @@ public class WorkLog {
     private String tagId;
 
     @Column(name = "created_at", insertable = false, updatable = false)
+    @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", insertable = false, updatable = false)
+    @org.hibernate.annotations.Generated(event = {org.hibernate.generator.EventType.INSERT, org.hibernate.generator.EventType.UPDATE})
     private LocalDateTime updatedAt;
 
     @OneToMany(mappedBy = "log", cascade = CascadeType.ALL, orphanRemoval = true)

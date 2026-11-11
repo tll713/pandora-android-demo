@@ -26,56 +26,51 @@ await page.clock.install({ time: new Date('2026-11-03T12:00:00+08:00') });
 await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json',
   body: JSON.stringify(route.request().url().endsWith('/auth/login') ? { token: 'tag-ui-token', user: member } : { user: member, db }) }));
 const computedColors = locator => locator.evaluate(el => ({ background: getComputedStyle(el).backgroundColor, text: getComputedStyle(el).color }));
-const expected = {
-  design: { background: 'rgb(26, 188, 156)', text: 'rgb(0, 0, 0)' },
-  meeting: { background: 'rgb(155, 89, 182)', text: 'rgb(255, 255, 255)' },
-  light: { background: 'rgb(255, 255, 255)', text: 'rgb(0, 0, 0)' },
-  dark: { background: 'rgb(0, 0, 0)', text: 'rgb(255, 255, 255)' }
+const expected = Object.fromEntries(tags.map(tag => {
+  const rgb = [1,3,5].map(offset => parseInt(tag.color.slice(offset,offset+2),16));
+  return [tag.id,{background:`rgb(${rgb.map(v => Math.round(v*0.12+255*0.88)).join(', ')})`,text:`rgb(${rgb.map(v => Math.round(v*0.44)).join(', ')})`}];
+}));
+const luminance = color => {
+  const channels = color.match(/\d+/g).map(Number).map(v => v/255).map(v => v <= 0.04045 ? v/12.92 : ((v+0.055)/1.055)**2.4);
+  return channels[0]*0.2126 + channels[1]*0.7152 + channels[2]*0.0722;
 };
 try {
   await page.goto(process.env.PANDORA_URL || 'http://127.0.0.1:5173');
-  await page.locator('[name=identifier]').fill('系统管理员');
+  await page.locator('[name=identifier]').fill(member.name);
   await page.locator('[name=password]').fill('admin');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.locator('[data-form=login] button[type=submit]').click();
   await page.locator('[data-route=calendar]').click();
+  assert.equal(await page.locator('.month-task-span').evaluateAll(els => els.filter(el => el.dataset.spanStart <= '2026-11-03' && el.dataset.spanEnd >= '2026-11-03').length),3);
+  assert.equal(await page.locator('.month-task-span[data-id=design]').getAttribute('data-span-start'),'2026-11-02');
+  assert.equal(await page.locator('.month-task-span[data-id=design]').getAttribute('data-span-end'),'2026-11-03');
+  await page.locator('[data-event-day="2026-11-03"] .calendar-more').click();
+  assert.equal(await page.locator('.overflow-task').count(),6);
   for (const tag of tags) {
-    const card = page.locator(`.zoom-event[data-id=${tag.id}]`).first();
-    assert.deepEqual(await computedColors(card), expected[tag.id], 'month cards use the exact tag color');
-    await card.click();
-    assert.equal(await page.locator('.task-tag').innerText(), tag.name);
-    assert.deepEqual(await computedColors(page.locator('.task-tag')), expected[tag.id]);
-    assert.equal(await page.locator('.task-tag > *').count(), 0, 'tag names render as text');
-    await page.locator('[data-close]').click();
-    assert.deepEqual(await computedColors(page.locator(`.calendar-selected-task[data-id=${tag.id}]`)), expected[tag.id]);
+    const badge = page.locator(`.overflow-task[data-id=${tag.id}] .task-tag`);
+    const colors = await computedColors(badge);
+    assert.deepEqual(colors,expected[tag.id]);
+    const contrast = (luminance(colors.background)+0.05)/(luminance(colors.text)+0.05);
+    assert.ok(contrast>=4.5,`readable label ${tag.id}: ${contrast}`);
+    assert.equal(await badge.innerText(),tag.name);
+    assert.equal(await badge.locator('> *').count(),0);
   }
-  for (const id of ['untagged', 'removed']) {
-    await page.locator(`.zoom-event[data-id=${id}]`).first().click();
-    assert.equal(await page.locator('.task-tag').innerText(), '未设置标签');
-    await page.locator('[data-close]').click();
-  }
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('#toast')).opacity === '0');
-  await mkdir('deliverables/verification', { recursive: true });
-  await page.screenshot({ path: 'deliverables/verification/task-tag-month.png', fullPage: true });
-  await page.locator('.zoom-event[data-id=meeting]').first().click();
-  await page.screenshot({ path: 'deliverables/verification/task-tag-detail.png', fullPage: true });
   await page.locator('[data-close]').click();
-  await page.locator('[data-action=calendar-zoom-toggle]').click();
-  const dots = await page.locator('.task-dot').evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor));
-  // The collapsed view intentionally shows at most three markers per date.
-  for (const id of ['design', 'dark', 'light']) assert.ok(dots.includes(expected[id].background));
-  await page.locator('[data-action=calendar-zoom-toggle]').click();
-  for (const tag of tags) assert.equal((await computedColors(page.locator(`.zoom-bar[data-id=${tag.id}]`).first())).background, expected[tag.id].background);
-  await page.locator('[data-action=calendar-zoom-toggle]').click();
   await page.locator('.calendar-selected-agenda [data-mode=day]').click();
   for (const tag of tags) {
     const event = page.locator(`.timeline-item[data-id=${tag.id}]`);
-    assert.deepEqual(await computedColors(event), expected[tag.id], 'day events keep tag colors, including completed and spanning tasks');
+    assert.deepEqual(await computedColors(event),expected[tag.id]);
     await event.click();
-    assert.equal(await page.locator('.task-tag').innerText(), tag.name);
+    assert.equal(await page.locator('.task-tag').innerText(),tag.name);
     await page.locator('[data-close]').click();
   }
-  assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, checks: ['exact tag colors across three month zoom levels and day events', 'detail tags display from month and day events', 'light and dark labels remain readable', 'untagged and removed tags fall back safely', 'completed and cross-day tasks retain tag colors'] }, null, 2));
-} finally {
-  await browser.close();
-}
+  const fallbackColors = await computedColors(page.locator('.timeline-item[data-id=untagged]'));
+  assert.deepEqual(await computedColors(page.locator('.timeline-item[data-id=removed]')),fallbackColors);
+  await page.locator('[data-task-view=list]').click();
+  assert.equal(await page.locator('.task-table .task-tag').count(),6);
+  await page.locator('[data-action=new-task]').click();
+  const choice = page.locator('.tag-choice').filter({hasText:tags[1].name});
+  await choice.click(); assert.equal(await choice.locator('input').isChecked(),true);
+  assert.deepEqual(await computedColors(choice),expected.meeting);
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({passed:true,checks:['pastel labels with WCAG AA contrast including white and black source colors','three month items plus expandable overflow','escaped label names','cross-day and completed tasks retain colors','removed labels use safe fallback','task list labels and colored selection']},null,2));
+} finally { await browser.close(); }

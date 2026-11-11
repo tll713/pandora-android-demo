@@ -8,6 +8,13 @@ export const USERS = [
 ];
 export const STATUS = { todo: '待开始', doing: '进行中', done: '已完成' };
 export const PRIORITY = { high: '高优先级', medium: '中优先级', low: '低优先级' };
+export function logSections(content = '') {
+  const match = /^【今日完成】\n([\s\S]*?)\n\n【下一步计划】\n([\s\S]*?)\n\n【问题与协助】(?:\n([\s\S]*))?$/.exec(content);
+  return match ? { content: match[1], plan: match[2], issues: match[3] || '' } : { content, plan: '', issues: '' };
+}
+export function composeLogSections(values) {
+  return `【今日完成】\n${(values.content || '').trim()}\n\n【下一步计划】\n${(values.plan || '').trim()}\n\n【问题与协助】\n${(values.issues || '').trim()}`;
+}
 export const STORAGE_KEY = 'pandora.workspace.v2';
 export const userById = id => USERS.find(u => u.id === id);
 export const isManager = u => Boolean(u && u.role !== '员工' && u.role !== 'EMPLOYEE');
@@ -69,6 +76,32 @@ function cleaned(value, name, max) {
 }
 export const taskStartAt = task => task.startAt || task.dueAt;
 export const taskOccursOn = (task, day) => taskStartAt(task).slice(0,10) <= day && task.dueAt.slice(0,10) >= day;
+export function calendarWeekLayout(tasks, days, month, limit = 3) {
+  const sorted = [...tasks].sort((a, b) => taskStartAt(a).localeCompare(taskStartAt(b)) || a.dueAt.localeCompare(b.dueAt) || a.id.localeCompare(b.id));
+  const dates = days.map(day => {
+    const list = day.slice(0, 7) === month ? sorted.filter(task => taskOccursOn(task, day)) : [];
+    return { day, visible: list.slice(0, limit), overflow: Math.max(0, list.length - limit) };
+  });
+  const segments = [], lanes = Array(limit).fill(null);
+  let laneCount = 0;
+  dates.forEach(({ day, visible }, column) => {
+    const ids = new Set(visible.map(task => task.id));
+    lanes.forEach((segment, lane) => { if (segment && !ids.has(segment.task.id)) lanes[lane] = null; });
+    for (const task of visible) {
+      let lane = lanes.findIndex(segment => segment?.task.id === task.id);
+      if (lane < 0) {
+        lane = lanes.indexOf(null);
+        const segment = { task, lane, column, length: 0, start: day, end: day };
+        lanes[lane] = segment;
+        segments.push(segment);
+        laneCount = Math.max(laneCount, lane + 1);
+      }
+      lanes[lane].length++;
+      lanes[lane].end = day;
+    }
+  });
+  return { dates, segments, laneCount };
+}
 function taskValues(u, v, existing) {
   const owners = [...new Set(v.owners || [])];
   requireValue(owners.length > 0 && owners.every(o => allowedAssignees(u).some(a => a.id === o)), '请选择管理范围内的负责人');

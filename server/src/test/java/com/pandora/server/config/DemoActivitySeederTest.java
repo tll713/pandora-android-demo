@@ -44,7 +44,7 @@ class DemoActivitySeederTest {
 
         seeder.topUpAt(today);
         assertEquals(30, logs.count());
-        assertEquals(60, todos.count());
+        assertEquals(186, todos.count());
         assertEquals(7, logs.findByAuthorIdAndDateBetween("lin", today.minusDays(6), today).size());
         var todayTodos = todos.findByOwnerIdOrderByDateAscCreatedAtAsc("lin").stream().filter(t -> t.getDate().equals(today)).toList();
         assertEquals(6, todayTodos.size());
@@ -53,12 +53,12 @@ class DemoActivitySeederTest {
 
         seeder.topUpAt(today);
         assertEquals(30, logs.count());
-        assertEquals(60, todos.count());
+        assertEquals(186, todos.count());
 
         LocalDate later = today.plusDays(4);
         seeder.topUpAt(later);
         assertEquals(34, logs.count());
-        assertEquals(84, todos.count());
+        assertEquals(186, todos.count());
         assertEquals(30, logs.findByAuthorIdAndDateBetween("lin", later.minusDays(29), later).size());
         assertEquals(6, todos.findByOwnerIdOrderByDateAscCreatedAtAsc("lin").stream().filter(t -> t.getDate().equals(later)).count());
     }
@@ -123,14 +123,29 @@ class DemoActivitySeederTest {
         }
         assertFalse(todos.findById("existing-manager").orElseThrow().isDone());
         assertTrue(todos.findById("existing-lin").orElseThrow().isDone());
-        assertEquals(180, todos.count());
+        assertEquals(558, todos.count());
         seeder.topUpAt(today);
-        assertEquals(180, todos.count());
+        assertEquals(558, todos.count());
 
         todos.deleteAll(todos.findByOwnerIdOrderByDateAscCreatedAtAsc("manager").stream()
                 .filter(item -> item.getDate().equals(today)).toList());
         seeder.topUpAt(today);
         assertEquals(0, todos.findByOwnerIdOrderByDateAscCreatedAtAsc("manager").stream()
                 .filter(item -> item.getDate().equals(today)).count());
+    }
+
+    @Test
+    void fillsEveryRemainingDayAndCarriesTheWindowAcrossMonthEnd() {
+        member("lin", "林予安");
+        LocalDate today = LocalDate.of(2026, 11, 11);
+        seeder.topUpAt(today);
+        var planned = todos.findByOwnerIdOrderByDateAscCreatedAtAsc("lin");
+        for (LocalDate date = today; !date.isAfter(LocalDate.of(2026, 11, 30)); date = date.plusDays(1)) {
+            LocalDate expectedDay = date;
+            assertEquals(6, planned.stream().filter(todo -> todo.getDate().equals(expectedDay)).count());
+        }
+        seeder.topUpAt(LocalDate.of(2026, 11, 30));
+        assertEquals(6, todos.findByOwnerIdOrderByDateAscCreatedAtAsc("lin").stream()
+                .filter(todo -> todo.getDate().equals(LocalDate.of(2026, 12, 3))).count());
     }
 }

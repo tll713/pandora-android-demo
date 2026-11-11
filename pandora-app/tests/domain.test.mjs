@@ -2,10 +2,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { USERS, userById, seedDatabase, validateDatabase, createTask, requestTaskChange, reviewTaskChange,
   canSeeTask, visibleTasks, visibleLogs, updateTaskDetail, completeTask, saveLog, canEditLog, recentLogs,
-  calendarDays, shiftCalendar, togglePin, createDemoAccount, isOverdue, isValidMinute, taskOccursOn, taskStartAt } from '../src/domain.js';
+  calendarDays, shiftCalendar, togglePin, createDemoAccount, isOverdue, isValidMinute, taskOccursOn, taskStartAt, calendarWeekLayout, logSections, composeLogSections } from '../src/domain.js';
 const manager=userById('manager'), lin=userById('lin'), zhou=userById('zhou'), founder=userById('founder'), admin=userById('admin');
 const now=new Date('2026-10-14T10:30:00'), db=()=>seedDatabase(now);
 const values={title:'验收任务',owners:['lin','zhou'],priority:'high',dueAt:'2026-10-15T16:45',detail:'交付可评审初稿'};
+
+test('month spans stay connected in stable lanes while each day keeps its first three tasks', () => {
+  const task = (id, start, end) => ({ id, startAt: `${start}T09:00`, dueAt: `${end}T18:00` });
+  const tasks = [task('long','2026-10-29','2026-11-12'), task('short','2026-11-02','2026-11-02'), task('third','2026-11-02','2026-11-03'), task('overflow','2026-11-02','2026-11-06')];
+  const days = Array.from({length:7}, (_,i) => `2026-11-0${i+1}`);
+  const layout = calendarWeekLayout(tasks, days, '2026-11');
+  const long = layout.segments.filter(s => s.task.id === 'long');
+  assert.equal(long.length, 1); assert.equal(long[0].length, 7);
+  const overflow = layout.segments.find(s => s.task.id === 'overflow');
+  assert.equal(overflow.start,'2026-11-03'); assert.equal(overflow.end,'2026-11-06');
+  assert.equal(layout.dates[1].overflow,1); assert.equal(layout.dates[2].overflow,0);
+  for (const {day, visible} of layout.dates) {
+    const spans = layout.segments.filter(s => s.start <= day && s.end >= day);
+    assert.deepEqual(spans.map(s => s.task.id).sort(),visible.map(t => t.id).sort());
+    assert.equal(new Set(spans.map(s => s.lane)).size,spans.length);
+    assert.ok(spans.length <= 3);
+  }
+  const next = calendarWeekLayout(tasks,Array.from({length:7},(_,i) => `2026-11-${String(i+8).padStart(2,'0')}`),'2026-11');
+  assert.equal(next.segments[0].start,'2026-11-08'); assert.equal(next.segments[0].end,'2026-11-12');
+  const boundary = calendarWeekLayout(tasks,['2026-10-29','2026-10-30','2026-10-31',...days.slice(0,4)],'2026-11');
+  assert.equal(boundary.segments[0].column,3); assert.equal(boundary.segments[0].start,'2026-11-01');
+  assert.deepEqual(calendarWeekLayout([], days, '2026-11').segments,[]);
+});
 
 test('seed is valid and stores time to minute with multiple owners, without numeric progress',()=>{
   const data=db(); assert.equal(validateDatabase(data),true); assert.deepEqual(data.tasks[0].owners,['lin','zhou']);
@@ -100,15 +123,25 @@ test('seven-day view excludes day eight and future, keeps archive data',()=>{
   assert.ok(logs.every(l=>l.date>='2026-10-08' && l.date<='2026-10-14' && l.author==='lin'));
   assert.ok(data.logs.some(l=>l.date==='2026-10-06'));
 });
-test('mobile logs belong only to the signed-in user, including managers and global roles',()=>{
+test('log discovery follows organization permissions for employees, leads, managers and global roles',()=>{
   const data=db();
   for (const u of [lin,zhou,manager,founder,admin]) {
     data.logs.push({...data.logs[0],id:`personal-${u.id}`,author:u.id});
     const logs=visibleLogs(data,u);
     assert.ok(logs.some(l=>l.id===`personal-${u.id}`));
-    assert.ok(logs.every(l=>l.author===u.id));
+    if (u === lin) assert.ok(logs.every(l=>l.author===u.id));
+    if (u === zhou) assert.ok(logs.every(l=>l.author === u.id || (userById(l.author).department === u.department && userById(l.author).role === '员工')));
+    if (u === manager) assert.ok(logs.every(l=>userById(l.author).department === u.department));
+    if (u === founder || u === admin) assert.equal(logs.length, data.logs.length);
   }
   assert.deepEqual(visibleLogs(data,null),[]);
+});
+test('daily report template round-trips sections and preserves legacy free text',()=>{
+  const values = {content:'完成交付\n第二项进展',plan:'下周验收',issues:'需要设计协助'};
+  assert.deepEqual(logSections(composeLogSections(values)),values);
+  assert.deepEqual(logSections('旧日志\n保留原文'),{content:'旧日志\n保留原文',plan:'',issues:''});
+  assert.deepEqual(logSections(composeLogSections({content:'完成工作'})),{content:'完成工作',plan:'',issues:''});
+  assert.deepEqual(logSections(composeLogSections({content:'完成工作'}).trim()),{content:'完成工作',plan:'',issues:''});
 });
 test('calendar handles leap month, Monday alignment, month-end and year transitions',()=>{
   const month=calendarDays('2024-02-20'); assert.equal(month[0],'2024-01-29'); assert.equal(month.at(-1),'2024-03-03'); assert.ok(month.includes('2024-02-29'));

@@ -7,6 +7,8 @@
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:ui": "node tests/personal.ui.mjs",
+    "test:workspace": "node tests/workspace.ui.mjs && node tests/task-tags.ui.mjs",
+    "test:mobile": "node tests/mobile-details.ui.mjs",
     "check": "node --check src/app.js && node --check src/domain.js && node --check server.mjs",
     "build:android": "python scripts/build_android.py"
   },

@@ -72,24 +72,37 @@ class PersonalAccountTest {
     }
 
     @Test
-    void mobileLogQueriesAlwaysUseCurrentAuthorRegardlessOfRole() {
+    void logDiscoveryQueriesRespectOrganizationAndRole() {
         WorkLogRepository logs = mock(WorkLogRepository.class);
         LogService service = new LogService(logs, mock(TaskService.class), users);
         LocalDate today = LocalDate.now();
-        WorkLog own = new WorkLog();
-        own.setAuthorId("manager");
-        own.setDate(today.minusDays(15));
-        when(logs.findByAuthorId("manager")).thenReturn(List.of(own));
-        when(logs.findByAuthorIdAndDateBetween(eq("manager"), any(), any())).thenReturn(List.of(own));
         User user = user();
+        User colleague = new User(); colleague.setId("colleague"); colleague.setRole(User.Role.EMPLOYEE); colleague.setDepartment(user.getDepartment());
+        User lead = new User(); lead.setId("lead"); lead.setRole(User.Role.TEAM_LEAD); lead.setDepartment(user.getDepartment());
+        User outsider = new User(); outsider.setId("outsider"); outsider.setRole(User.Role.EMPLOYEE); outsider.setDepartment("其他部门");
+        when(users.findAll()).thenReturn(List.of(user,colleague,lead,outsider));
+        java.util.List<WorkLog> all = new java.util.ArrayList<>();
+        for (User member : List.of(user,colleague,lead,outsider)) {
+            WorkLog log = new WorkLog(); log.setAuthorId(member.getId()); log.setDate(today.minusDays(15)); all.add(log);
+            when(users.findById(member.getId())).thenReturn(Optional.of(member));
+        }
+        when(logs.findAll()).thenReturn(all);
+        when(logs.findByDateBetween(any(),any())).thenReturn(all);
+        when(logs.findByAuthorId(user.getId())).thenReturn(List.of(all.get(0)));
+        when(logs.findByAuthorIdAndDateBetween(eq(user.getId()),any(),any())).thenReturn(List.of(all.get(0)));
         for (User.Role role : User.Role.values()) {
             user.setRole(role);
-            assertEquals(List.of(own), service.getVisibleLogs(user));
-            assertEquals(List.of(own), service.getRecentLogs(user, 30));
-            assertEquals(List.of(own), service.getHistoryLogs(user, today.minusDays(6)));
+            List<WorkLog> expected = switch (role) {
+                case ADMIN, FOUNDER -> all;
+                case DEPT_MANAGER -> all.subList(0,3);
+                case TEAM_LEAD -> all.subList(0,2);
+                case EMPLOYEE -> all.subList(0,1);
+            };
+            assertEquals(expected,service.getVisibleLogs(user));
+            assertEquals(expected,service.getRecentLogs(user,30));
+            assertEquals(expected,service.getHistoryLogs(user,today.minusDays(6)));
+            assertEquals(expected.contains(all.get(3)),service.canViewLog(user,outsider.getId()));
+            assertEquals(expected.contains(all.get(2)),service.canViewLog(user,lead.getId()));
         }
-        verify(logs, never()).findAll();
-        verify(logs, never()).findByDepartment(anyString());
-        verify(logs, never()).findByDateBetween(any(), any());
     }
 }
