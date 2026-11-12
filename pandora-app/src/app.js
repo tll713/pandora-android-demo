@@ -13,9 +13,9 @@ const API = localStorage.getItem(API_KEY) || DEFAULT_API;
 
 const state = { token: localStorage.getItem('pandora.token'), user: null, route: 'dashboard', filter: 'all',
   calendarMode: 'month', calendarDate: dateKey(), todoDate: dateKey(), logRange: '7', logQuery: '', logComments: {},
-  logDepartment: '', logRole: '', logAuthor: '', logTag: '', logTask: '', logFrom: '', logTo: '', logSubmission: 'all', logCheckDate: dateKey(), messageFilter: 'all',
+  logDepartment: '', logRole: '', logAuthor: '', logFrom: '', logTo: '', logSubmission: 'all', logCheckDate: dateKey(), messageFilter: 'all',
   taskQuery: '', taskPriority: '', taskScope: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null, authView: 'login' };
-const APP_VERSION = '0.5.7';
+const APP_VERSION = '0.5.8';
 
 // ============ API 客户端 ============
 async function api(path, options = {}) {
@@ -110,13 +110,15 @@ function taskPalette(task) {
 }
 const tagBadge = task => `<span class="task-tag" style="${taskColorStyle(task)}">${esc(taskTag(task)?.name || '长期任务')}</span>`;
 function tagChoices(name, selected = '') {
-  return `<fieldset class="tag-choices"><legend>${name === 'tagId' ? '标签' : '任务标签'}</legend><label class="tag-choice"><input type="radio" name="${name}" value="" ${!selected ? 'checked' : ''}>不选标签</label>${(state.db.tags || []).map(tag => `<label class="tag-choice" style="${taskColorStyle({tagId: tag.id})}"><input type="radio" name="${name}" value="${esc(tag.id)}" ${selected === tag.id ? 'checked' : ''}><i style="background:${taskPalette({tagId: tag.id}).accent}"></i>${esc(tag.name)}</label>`).join('')}</fieldset>`;
+  const tags = state.db.tags || [];
+  const tools = isGlobal(user()) ? `<div class="tag-tools">${button('＋ 新建', 'tag-new', '', 'soft-button')}<details><summary>编辑已有标签</summary><div class="tag-management">${tags.map(tag => `<div><span class="task-tag" style="${taskColorStyle({tagId:tag.id})}">${esc(tag.name)}</span>${button('编辑','tag-edit',tag.id,'text-button')}</div>`).join('')}</div></details></div><div class="tag-editor" hidden></div>` : '';
+  return `<fieldset class="tag-choices"><legend>标签</legend><label class="tag-choice"><input type="radio" name="${name}" value="" ${!selected ? 'checked' : ''}>不选标签</label>${tags.map(tag => `<label class="tag-choice" style="${taskColorStyle({tagId: tag.id})}"><input type="radio" name="${name}" value="${esc(tag.id)}" ${selected === tag.id ? 'checked' : ''}><i style="background:${taskPalette({tagId: tag.id}).accent}"></i>${esc(tag.name)}</label>`).join('')}${tools}</fieldset>`;
 }
 const taskColorStyle = task => {
   const { bg, fg } = taskPalette(task);
   return `background:${bg};color:${fg};border-color:${bg}`;
 };
-const button = (label, action, id = '', cls = 'ghost-button') => `<button class="${cls}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
+const button = (label, action, id = '', cls = 'ghost-button') => `<button type="button" class="${cls}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
 function notify(text, error = false) {
   toast.textContent = text; toast.dataset.type = error ? 'error' : 'success'; toast.classList.add('toast--show');
   clearTimeout(notify.timer); notify.timer = setTimeout(() => toast.classList.remove('toast--show'), 3000);
@@ -263,12 +265,13 @@ function taskListView() {
 }
 
 function resetLogFilters() {
-  for (const key of ['logQuery','logDepartment','logRole','logAuthor','logTag','logTask','logFrom','logTo']) state[key] = '';
+  for (const key of ['logQuery','logDepartment','logRole','logAuthor','logFrom','logTo']) state[key] = '';
   state.logSubmission = 'all'; state.logCheckDate = dateKey();
 }
 function readLogFilters(form) {
   const values = Object.fromEntries(new FormData(form));
-  for (const [name,key] of Object.entries({query:'logQuery',department:'logDepartment',role:'logRole',author:'logAuthor',tag:'logTag',task:'logTask',from:'logFrom',to:'logTo',submission:'logSubmission',checkDate:'logCheckDate'})) state[key] = values[name] || (name === 'submission' ? 'all' : name === 'checkDate' ? dateKey() : '');
+  for (const [name,key] of Object.entries({query:'logQuery',department:'logDepartment',role:'logRole',author:'logAuthor',from:'logFrom',to:'logTo',submission:'logSubmission',checkDate:'logCheckDate'})) state[key] = values[name] || (name === 'submission' ? 'all' : name === 'checkDate' ? dateKey() : '');
+  if (state.logAuthor && !USERS.some(u => u.id === state.logAuthor && canViewLog(user(),u.id) && (!state.logDepartment || u.department === state.logDepartment) && (!state.logRole || u.role === state.logRole))) state.logAuthor = '';
   if (state.logFrom || state.logTo) state.logRange = 'all';
   if (state.logFrom && state.logTo && state.logFrom > state.logTo) { [state.logFrom,state.logTo] = [state.logTo,state.logFrom]; }
 }
@@ -283,7 +286,6 @@ function logsPage() {
   const submitted = new Set(allLogs.filter(l => l.date === state.logCheckDate).map(l => l.author));
   const missing = reportingMembers.filter(u => !submitted.has(u.id));
   const logs = allLogs.filter(l => ids.has(l.author) && (!from || l.date >= from) && l.date <= to)
-    .filter(l => (!state.logTag || l.tagId === state.logTag) && (!state.logTask || l.taskId === state.logTask))
     .filter(l => state.logSubmission === 'all' || (state.logSubmission === 'submitted' && l.date === state.logCheckDate))
     .filter(l => !query || `${l.title} ${l.content} ${userById(l.author)?.name || ''}`.toLowerCase().includes(query))
     .sort((a,b) => b.date.localeCompare(a.date) || String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
@@ -294,34 +296,50 @@ function logsPage() {
   const loading = needsHistory && state.logLoading;
   const error = needsHistory && state.logError;
   const incompleteCheck = state.logCheckDate < dayOffset(-6) && !state.logHistoryLoaded;
-  const active = query || state.logDepartment || state.logRole || state.logAuthor || state.logTag || state.logTask || state.logFrom || state.logTo || state.logSubmission !== 'all';
+  const active = query || state.logDepartment || state.logRole || state.logAuthor || state.logFrom || state.logTo || state.logSubmission !== 'all';
   const title = isGlobal(user()) ? '公司工作日志' : isDeptManager(user()) ? '本部门工作日志' : isTeamLead(user()) ? '团队成员日志' : '我的日志';
   const overview = supervisor ? `<section class="log-submission"><header><div><h2>提交概览</h2><p>${state.logCheckDate} · ${reportingMembers.length} 位成员</p></div><strong>${incompleteCheck ? '待加载' : `${reportingMembers.length - missing.length} / ${reportingMembers.length}`}</strong></header>${incompleteCheck ? '<p>请加载该日期的历史日志后查看提交情况。</p>' : `<div class="submission-members">${reportingMembers.map(u => `<button class="submission-person ${submitted.has(u.id) ? 'is-submitted' : ''}" data-log-member="${esc(u.id)}" title="筛选该成员日志">${esc(u.name)}<small>${submitted.has(u.id) ? '已提交' : '未提交'}</small></button>`).join('') || '<p>当前组织范围内没有成员</p>'}</div>`}</section>` : '';
-  return head(title, supervisor ? '先选部门、角色和日期，再查看成员提交情况与工作进展。' : '记录今日完成、下一步计划，以及需要协助的问题。', button('写日志','new-log','','primary-button')) +
-    `<section class="log-filter" aria-busy="${loading}"><div class="segmented log-range" role="group" aria-label="日志时间范围">${[['7','近7天'],['30','近30天'],['all','全部']].map(([id,label]) => `<button class="segment ${state.logRange === id ? 'is-active' : ''}" aria-pressed="${state.logRange === id}" data-log-range="${id}">${label}</button>`).join('')}</div><form class="log-search log-discovery" data-form="log-filter"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" name="query" value="${esc(state.logQuery)}" placeholder="搜索姓名或工作内容（选填）" aria-label="搜索日志"></label><div class="log-filter-fields">${supervisor ? select('department','部门',departments.map(d => [d,d]),state.logDepartment) + select('role','角色',roles,state.logRole) + select('author','成员',members.filter(u => !state.logDepartment || u.department === state.logDepartment).map(u => [u.id,u.name]),state.logAuthor) : ''}${select('tag','标签',(state.db.tags || []).map(t => [t.id,t.name]),state.logTag)}${select('task','关联任务',visibleTasks(state.db,user()).map(t => [t.id,t.title]),state.logTask)}<label>开始日期<input name="from" type="date" data-log-select max="${dateKey()}" value="${state.logFrom}"></label><label>结束日期<input name="to" type="date" data-log-select max="${dateKey()}" value="${state.logTo}"></label>${supervisor ? `<label>统计日期<input name="checkDate" type="date" data-log-select max="${dateKey()}" value="${state.logCheckDate}"></label><label>提交状态<select name="submission" data-log-select>${[['all','全部日志'],['submitted','统计日已提交'],['missing','统计日未提交成员']].map(([id,label]) => `<option value="${id}" ${state.logSubmission === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}</div><button class="soft-button" type="submit">搜索</button></form><div class="log-filter-summary"><span role="status">${loading ? '正在加载历史日志…' : error || `共 ${logs.length} 篇日志`}</span>${error ? button('重新加载','retry-log-history','','text-button') : ''}${active ? button('清除筛选','clear-log-filters','','text-button') : ''}</div></section>${overview}<section class="log-results" aria-label="日志列表">${state.logSubmission === 'missing' ? (incompleteCheck ? empty('请先加载统计日期的日志') : missing.map(u => `<article class="log-card"><b>${esc(u.name)}</b><p>${esc(u.department)} · ${esc(u.roleName || u.role)}</p><span>${state.logCheckDate} 未提交</span></article>`).join('') || empty('该范围成员均已提交')) : logs.map(logCard).join('') || empty(loading ? '正在加载日志' : error ? '日志加载失败，请重试' : '这个范围内没有符合条件的日志')}</section>`;
+  return head(title, supervisor ? '按部门、职位、成员和日期筛选，查看每天的工作日志与提交情况。' : '记录今日完成、下一步计划，以及需要协助的问题。', button('写日志','new-log','','primary-button')) +
+    `<section class="log-filter" aria-busy="${loading}"><div class="segmented log-range" role="group" aria-label="日志时间范围">${[['7','近7天'],['30','近30天'],['all','全部']].map(([id,label]) => `<button class="segment ${state.logRange === id ? 'is-active' : ''}" aria-pressed="${state.logRange === id}" data-log-range="${id}">${label}</button>`).join('')}</div><form class="log-search log-discovery" data-form="log-filter"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" name="query" value="${esc(state.logQuery)}" placeholder="搜索姓名或工作内容（选填）" aria-label="搜索日志"></label><div class="log-filter-fields">${supervisor ? select('department','部门',departments.map(d => [d,d]),state.logDepartment) + select('role','职位',roles,state.logRole) + select('author','成员',members.filter(u => (!state.logDepartment || u.department === state.logDepartment) && (!state.logRole || u.role === state.logRole)).map(u => [u.id,u.name]),state.logAuthor) : ''}<label>开始日期<input name="from" type="date" data-log-select max="${dateKey()}" value="${state.logFrom}"></label><label>结束日期<input name="to" type="date" data-log-select max="${dateKey()}" value="${state.logTo}"></label>${supervisor ? `<label>统计日期<input name="checkDate" type="date" data-log-select max="${dateKey()}" value="${state.logCheckDate}"></label><label>提交状态<select name="submission" data-log-select>${[['all','全部日志'],['submitted','统计日已提交'],['missing','统计日未提交成员']].map(([id,label]) => `<option value="${id}" ${state.logSubmission === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}</div><button class="soft-button" type="submit">搜索</button></form><div class="log-filter-summary"><span role="status">${loading ? '正在加载历史日志…' : error || `共 ${logs.length} 篇日志`}</span>${error ? button('重新加载','retry-log-history','','text-button') : ''}${active ? button('清除筛选','clear-log-filters','','text-button') : ''}</div></section>${overview}<section class="log-results" aria-label="日志列表">${state.logSubmission === 'missing' ? (incompleteCheck ? empty('请先加载统计日期的日志') : missing.map(u => `<article class="log-card"><b>${esc(u.name)}</b><p>${esc(u.department)} · ${esc(u.roleName || u.role)}</p><span>${state.logCheckDate} 未提交</span></article>`).join('') || empty('该范围成员均已提交')) : logs.map(logCard).join('') || empty(loading ? '正在加载日志' : error ? '日志加载失败，请重试' : '这个范围内没有符合条件的日志')}</section>`;
 }
 
-const messageKey = r => `${r.id}:${r.status}:${r.reviewedAt || r.createdAt}`;
+const messageKey = r => r.messageType === 'update' ? r.id : `${r.id}:${r.status}:${r.reviewedAt || r.createdAt}`;
+function allMessages() {
+  return [...visibleRequests(state.db,user()), ...(state.db.notifications || []).map(n => ({...n,messageType:'update'}))];
+}
 function readMessages() {
   try { const value = JSON.parse(localStorage.getItem(`pandora.messages.${user().id}`) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; }
 }
 function unreadMessages() {
   const read = new Set(readMessages());
-  return visibleRequests(state.db,user()).filter(r => !read.has(messageKey(r))).length;
+  return allMessages().filter(r => !read.has(messageKey(r))).length;
 }
 function markMessagesRead(requests) {
   try { localStorage.setItem(`pandora.messages.${user().id}`, JSON.stringify([...new Set([...readMessages(), ...requests.map(messageKey)])].slice(-2000))); } catch { /* Storage may be unavailable in private browsing. */ }
 }
+function updateMessageCard(n) {
+  return `<article class="log-card"><div class="log-card-top"><b>${n.kind === 'tasks' ? '任务看板' : '事件纪'}更新</b><span>${stamp(n.createdAt)}</span></div><h3>${esc(n.title)}</h3><p>${esc(n.summary)}</p>${button('查看消息','notification',n.id,'soft-button')}</article>`;
+}
 function messagesContent() {
-  const read = new Set(readMessages()), all = visibleRequests(state.db,user());
-  const requests = all.filter(r => state.messageFilter === 'review' ? canReviewRequest(user(),r) : state.messageFilter === 'mine' ? r.proposer === user().id : state.messageFilter === 'results' ? r.proposer === user().id && r.status !== 'pending' : state.messageFilter === 'unread' ? !read.has(messageKey(r)) : true)
+  const read = new Set(readMessages()), all = allMessages();
+  const requests = all.filter(r => state.messageFilter === 'review' ? canReviewRequest(user(),r) : state.messageFilter === 'mine' ? r.proposer === user().id : state.messageFilter === 'results' ? r.messageType !== 'update' && r.status !== 'pending' : state.messageFilter === 'unread' ? !read.has(messageKey(r)) : ['events','tasks'].includes(state.messageFilter) ? r.messageType === 'update' && r.kind === state.messageFilter : true)
     .sort((a,b) => Number(canReviewRequest(user(),b)) - Number(canReviewRequest(user(),a)) || String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
-  return `<div class="messages-toolbar"><p>任务申请、待办审核和审核结果</p>${button('全部已读','messages-read','','soft-button')}</div>` +
-    `<section class="message-summary"><span><b>${all.filter(r => canReviewRequest(user(),r)).length}</b>待我审核</span><span><b>${all.filter(r => r.proposer === user().id && r.status === 'pending').length}</b>我的待审申请</span><span><b>${unreadMessages()}</b>未读消息</span></section><div class="segmented message-filters">${[['all','全部'],['unread','未读'],...(isGlobal(user()) ? [['review','待我审核']] : []),['mine','我的申请'],['results','审核结果']].map(([id,label]) => `<button class="segment ${state.messageFilter === id ? 'is-active' : ''}" data-message-filter="${id}">${label}</button>`).join('')}</div><section class="message-list">${requests.map(r => `<div class="message-item ${read.has(messageKey(r)) ? '' : 'is-unread'}">${requestCard(r)}</div>`).join('') || empty('暂无此类消息')}</section>`;
+  return `<div class="messages-toolbar"><p>事件纪、任务看板更新与申请审核通知</p>${button('全部已读','messages-read','','soft-button')}</div>` +
+    `<section class="message-summary"><span><b>${all.filter(r => canReviewRequest(user(),r)).length}</b>待我审核</span><span><b>${all.filter(r => r.proposer === user().id && r.status === 'pending').length}</b>我的待审申请</span><span><b>${unreadMessages()}</b>未读消息</span></section><div class="segmented message-filters">${[['all','全部'],['unread','未读'],['events','事件纪'],['tasks','任务看板'],...(isGlobal(user()) ? [['review','待我审核']] : []),['mine','我的申请'],['results','审核结果']].map(([id,label]) => `<button class="segment ${state.messageFilter === id ? 'is-active' : ''}" data-message-filter="${id}">${label}</button>`).join('')}</div><section class="message-list">${requests.map(r => `<div class="message-item ${read.has(messageKey(r)) ? '' : 'is-unread'}">${r.messageType === 'update' ? updateMessageCard(r) : requestCard(r)}</div>`).join('') || empty('暂无此类消息')}</section>`;
 }
 function openMessages() {
   open('消息', `<div class="messages-dialog">${messagesContent()}</div>`);
   modal.dataset.messages = 'list';
+}
+
+function notificationDetail(id) {
+  const n = (state.db.notifications || []).find(n => n.id === id);
+  if (!n) return;
+  markMessagesRead([{...n,messageType:'update'}]); render();
+  const task = visibleTasks(state.db,user()).find(t => t.id === n.targetId);
+  const highlight = (state.db.highlights || []).find(h => h.id === n.targetId);
+  open(n.title, `<div class="request-content">${button('‹ 返回消息','messages-return','','text-button messages-back')}<p>${esc(n.summary)}</p><p class="panel-note">${stamp(n.createdAt)}</p>${task ? button('查看任务','task',task.id,'soft-button') : highlight ? button('查看事项','highlight',highlight.id,'soft-button') : '<p class="panel-note">该内容已移除或当前不在你的查看范围内。</p>'}</div>`);
+  modal.dataset.messages = 'detail';
 }
 
 
@@ -653,8 +671,10 @@ function taskDetail(id) {
     `<div class="detail-history"><div class="section-label">执行与审核记录</div>${[...t.history].reverse().map(h => `<div class="history-item"><span></span><p class="log-content">${esc(h.text)}<small>${esc(userById(h.actor)?.name)} · ${stamp(h.at)}</small></p></div>`).join('')}</div>`);
 }
 
-function taskForm(id = '') {
+async function taskForm(id = '') {
   if (id && !isManager(user())) return notify('只有负责人可以申请编辑任务', true);
+  try { const tags = await api('/tags'); if (Array.isArray(tags)) state.db.tags = tags; }
+  catch (error) { return notify(error.message,true); }
   const t = id ? state.db.tasks.find(t => t.id === id) : null;
   const allowed = state.db.allowedAssignees?.length ? state.db.allowedAssignees : [user()];
   const owners = t?.owners || [user().id];
@@ -664,6 +684,35 @@ function taskForm(id = '') {
     : `<input type="hidden" name="owners" value="${esc(user().id)}"><p class="task-assignee-self">负责人 · ${esc(user().name)}</p>`;
   const tagField = tagChoices('tagId', t?.tagId);
   open(t ? '申请编辑任务' : '创建任务申请', `<form class="modal-form" data-form="task" data-id="${esc(id)}"><label>任务名称<input name="title" value="${esc(t?.title || '')}" maxlength="80" required></label>${ownerField}${tagField}<label>开始时间<input type="datetime-local" name="startAt" value="${t ? taskStartAt(t) : `${defaultDate}T09:00`}" step="60" required></label><label>结束时间<input type="datetime-local" name="dueAt" value="${t?.dueAt || `${defaultDate}T18:30`}" step="60" required></label><label>优先级<select name="priority">${Object.entries(PRIORITY).map(([priority,label]) => `<option value="${priority}" ${t?.priority === priority ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label>任务说明<textarea name="detail" maxlength="2000" rows="4">${esc(t?.detail || '')}</textarea></label><p class="panel-note">创建申请通过后，任务会出现在相关负责人的视图中。</p><div class="modal-actions"><button class="primary-button" type="submit">${t ? '提交修改申请' : '提交创建申请'}</button></div></form>`);
+}
+
+function tagEditor(id = '') {
+  if (!isGlobal(user())) return;
+  const editor = modal.querySelector('.tag-editor');
+  if (!editor) return;
+  const tag = state.db.tags.find(t => t.id === id);
+  editor.hidden = false;
+  editor.innerHTML = `<b>${tag ? '编辑标签' : '新建标签'}</b><label>标签名称<input name="tagName" maxlength="40" value="${esc(tag?.name || '')}" placeholder="请输入标签名称"></label><label>标签颜色<input name="tagColor" type="color" value="${esc(tag?.color || '#1abc9c')}"></label><div class="tag-editor-actions">${button('取消','tag-cancel','','ghost-button')}${button('保存标签','tag-save',id,'soft-button')}</div><p class="form-error" role="alert"></p>`;
+  editor.querySelector('input').focus();
+}
+
+async function saveTag(id) {
+  if (!isGlobal(user())) return;
+  const editor = modal.querySelector('.tag-editor');
+  const name = editor.querySelector('[name="tagName"]').value.trim();
+  const color = editor.querySelector('[name="tagColor"]').value;
+  const error = editor.querySelector('.form-error'), submit = editor.querySelector('[data-action="tag-save"]');
+  if (!name || name.length > 40) { error.textContent = '标签名称需为 1～40 个字'; return; }
+  submit.disabled = true; error.textContent = '';
+  try {
+    const tag = await api(`/admin/tags${id ? `/${encodeURIComponent(id)}` : ''}`, {method:id ? 'PUT' : 'POST',body:JSON.stringify({name,color})});
+    state.db.tags = await api('/tags');
+    const field = modal.querySelector('.tag-choices');
+    const selected = id ? field.querySelector('input:checked')?.value || '' : tag.id;
+    field.outerHTML = tagChoices('tagId',selected);
+    notify(id ? '标签已更新，所有成员将使用最新标签' : '标签已新建并选中');
+  } catch (e) { error.textContent = e.message; }
+  finally { submit.disabled = false; }
 }
 
 function chooseLogDate() {
@@ -680,7 +729,7 @@ function logForm(id = '', selectedDate = '') {
   const logDate = l?.date || selectedDate || dateKey();
   const dateField = `<label>日志日期<input type="date" name="date" value="${logDate}" readonly></label>`;
   const sections = logSections(l?.content || '');
-  open(l ? `编辑${shortDate(l.date)}日志` : '写工作日志', `<form class="modal-form" data-form="log" data-id="${esc(l?.id || '')}">${dateField}<p class="form-tip">每人每天一篇，可补写或编辑最近三天 · 日报模板</p><label>今日完成<textarea name="content" maxlength="2800" rows="5" placeholder="记录完成的工作、结果和进展" required>${esc(sections.content)}</textarea></label><label>下一步计划<textarea name="plan" maxlength="2800" rows="3" placeholder="接下来准备推进什么？">${esc(sections.plan)}</textarea></label><label>问题与协助<textarea name="issues" maxlength="2800" rows="3" placeholder="有哪些阻塞，需要谁提供什么帮助？">${esc(sections.issues)}</textarea></label><p class="panel-note">三个部分合计最多 3000 字，含段落标题。</p><details><summary>标题、标签与关联任务（可选）</summary><label>标题<input name="title" value="${esc(l?.title || '')}" maxlength="80" placeholder="不填则自动使用日志日期"></label>${tagChoices('tagId',l?.tagId)}<label>关联任务<select name="taskId"><option value="">不关联任务</option>${visibleTasks(state.db,user()).map(t => `<option value="${esc(t.id)}" ${l?.taskId === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('')}</select></label></details><div class="modal-actions"><button class="primary-button" type="submit">保存日志</button></div></form>`);
+  open(l ? `编辑${shortDate(l.date)}日志` : '写工作日志', `<form class="modal-form" data-form="log" data-id="${esc(l?.id || '')}">${dateField}<p class="form-tip">每人每天一篇，可补写或编辑最近三天 · 日报模板</p><label>今日完成<textarea name="content" maxlength="2800" rows="5" placeholder="记录完成的工作、结果和进展" required>${esc(sections.content)}</textarea></label><label>下一步计划<textarea name="plan" maxlength="2800" rows="3" placeholder="接下来准备推进什么？">${esc(sections.plan)}</textarea></label><label>问题与协助<textarea name="issues" maxlength="2800" rows="3" placeholder="有哪些阻塞，需要谁提供什么帮助？">${esc(sections.issues)}</textarea></label><p class="panel-note">三个部分合计最多 3000 字，含段落标题。</p><details><summary>自定义标题（可选）</summary><label>标题<input name="title" value="${esc(l?.title || '')}" maxlength="80" placeholder="不填则自动使用日志日期"></label></details><div class="modal-actions"><button class="primary-button" type="submit">保存日志</button></div></form>`);
 }
 
 async function logDetail(id) {
@@ -714,7 +763,7 @@ function requestDetail(id) {
   if (!r) return notify('无权查看申请',true);
   const fromMessages = Boolean(modal.dataset.messages);
   const view = v => v ? `<h3>${esc(v.title)}</h3><p>负责人 · ${esc(names(v.owners))}<br>开始 · ${dueText(taskStartAt(v))}<br>结束 · ${dueText(v.dueAt)}<br>${PRIORITY[v.priority]}</p><p class="log-content">${esc(v.detail)}</p>` : '<p>无</p>';
-  open(`${kindLabel(r.kind)}任务申请`, `<div class="request-content">${r.before ? '<h4>原内容</h4>'+view(r.before) : ''}<h4>${r.kind === 'delete' ? '变更结果' : '申请内容'}</h4>${r.kind === 'delete' ? '<p>审核通过后归档删除，历史记录仍保留。</p>' : view(r.after)}<p class="panel-note">申请人：${esc(userById(r.proposer)?.name)} · ${stamp(r.createdAt)}</p>${r.reason ? `<p>审核备注：${esc(r.reason)}</p>` : ''}</div>${canReviewRequest(user(),r) ? `<form class="modal-form" data-form="review" data-id="${esc(id)}"><label>审核备注（驳回必填）<textarea name="reason" maxlength="500" rows="3"></textarea></label><div class="modal-actions"><button class="ghost-button" name="decision" value="reject" type="submit">驳回</button><button class="primary-button" name="decision" value="approve" type="submit">审核通过</button></div></form>` : '<p class="detail-copy">申请人不能自审；待审核内容需另一位管理员或创始人处理。</p>'}`);
+  open(`${kindLabel(r.kind)}任务申请`, `<div class="request-content">${r.before ? '<h4>原内容</h4>'+view(r.before) : ''}<h4>${r.kind === 'delete' ? '变更结果' : '申请内容'}</h4>${r.kind === 'delete' ? '<p>审核通过后归档删除，历史记录仍保留。</p>' : view(r.after)}<p class="panel-note">申请人：${esc(userById(r.proposer)?.name)} · ${stamp(r.createdAt)}</p>${r.reason ? `<p>审核备注：${esc(r.reason)}</p>` : ''}</div>${r.status !== 'pending' ? `<p class="detail-copy">审核结果：${r.status === 'approved' ? '已通过' : '已驳回'}<br>审核人：${esc(userById(r.reviewer)?.name || '管理员或创始人')} · ${stamp(r.reviewedAt || r.createdAt)}</p>` : canReviewRequest(user(),r) ? `<form class="modal-form" data-form="review" data-id="${esc(id)}"><label>审核备注（驳回必填）<textarea name="reason" maxlength="500" rows="3"></textarea></label><div class="modal-actions"><button class="ghost-button" name="decision" value="reject" type="submit">驳回</button><button class="primary-button" name="decision" value="approve" type="submit">审核通过</button></div></form>` : '<p class="detail-copy">申请人不能自审；待审核内容需另一位管理员或创始人处理。</p>'}`);
   if (fromMessages) {
     modal.dataset.messages = 'request';
     modal.querySelector('.request-content').insertAdjacentHTML('beforebegin', button('‹ 返回消息', 'messages-return', '', 'text-button messages-back'));
@@ -723,9 +772,19 @@ function requestDetail(id) {
 
 // ============ 操作分发 ============
 async function action(name,id) {
-  if (name === 'messages-open') { state.messageFilter = 'all'; return openMessages(); }
+  if (name === 'messages-open') {
+    state.messageFilter = 'all'; openMessages();
+    try { await loadWorkspace(); render(); if (modal.dataset.messages === 'list') openMessages(); }
+    catch (e) { notify(e.message,true); }
+    return;
+  }
   if (name === 'messages-return') return openMessages();
-  if (name === 'messages-read') { markMessagesRead(visibleRequests(state.db,user())); render(); return openMessages(); }
+  if (name === 'messages-read') { markMessagesRead(allMessages()); render(); return openMessages(); }
+  if (name === 'notification') return notificationDetail(id);
+  if (name === 'tag-new') return tagEditor();
+  if (name === 'tag-edit') return tagEditor(id);
+  if (name === 'tag-save') return saveTag(id);
+  if (name === 'tag-cancel') { const editor = modal.querySelector('.tag-editor'); if (editor) { editor.hidden = true; editor.innerHTML = ''; } return; }
   if (name === 'calendar-overflow') {
     state.calendarDate = id;
     const tasks = visibleTasks(state.db,user()).filter(t => taskOccursOn(t,id));
@@ -915,7 +974,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', async e => {
   if (e.target.matches('[data-log-select]')) {
     const form = e.target.closest('form');
-    if (e.target.name === 'department') form.elements.author.value = '';
+    if (['department','role'].includes(e.target.name)) form.elements.author.value = '';
     readLogFilters(form); render();
     if (state.logRange !== '7' || state.logCheckDate < dayOffset(-6)) await loadLogHistory();
     return;
@@ -1040,10 +1099,36 @@ document.addEventListener('submit', async e => {
 });
 
 modal.addEventListener('cancel', e => {
-  if (modal.dataset.messages === 'request') { e.preventDefault(); openMessages(); }
+  if (['request','detail'].includes(modal.dataset.messages)) { e.preventDefault(); openMessages(); }
 });
-window.pandoraBack = () => { if (modal.open) { if (modal.dataset.messages === 'request') openMessages(); else close(); return true; } if (state.route !== 'dashboard') { state.route='dashboard'; render(); return true; } return false; };
-document.addEventListener('visibilitychange', () => { if (!document.hidden && state.token) loadWorkspace().then(render).catch(e => notify(e.message, true)); });
+window.pandoraBack = () => { if (modal.open) { if (['request','detail'].includes(modal.dataset.messages)) openMessages(); else close(); return true; } if (state.route !== 'dashboard') { state.route='dashboard'; render(); return true; } return false; };
+let refreshingWorkspace = false;
+async function refreshWorkspace() {
+  if (refreshingWorkspace || document.hidden || !state.token || !state.db) return;
+  refreshingWorkspace = true;
+  const tagsBefore = JSON.stringify(state.db.tags);
+  try {
+    await loadWorkspace();
+    // Keep form drafts and the reader's place while receiving updates.
+    if (!modal.open && !root.querySelector('form')?.contains(document.activeElement)) render();
+    if (modal.dataset.messages === 'list') { render(); openMessages(); }
+    const field = modal.querySelector('[data-form="task"] .tag-choices');
+    if (field && tagsBefore !== JSON.stringify(state.db.tags) && !field.querySelector('.tag-editor:not([hidden])')) {
+      const selected = field.querySelector('input:checked')?.value || '';
+      field.outerHTML = tagChoices('tagId',state.db.tags.some(t => t.id === selected) ? selected : '');
+    }
+  } catch { /* Retry on the next refresh; manual actions still report errors. */ }
+  finally { refreshingWorkspace = false; }
+}
+setInterval(refreshWorkspace,30000);
+document.addEventListener('visibilitychange',refreshWorkspace);
+window.addEventListener('focus',refreshWorkspace);
+modal.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.closest('.tag-editor') && e.target.tagName === 'INPUT') {
+    e.preventDefault(); const submit = modal.querySelector('[data-action="tag-save"]');
+    if (submit && !submit.disabled) saveTag(submit.dataset.id);
+  }
+});
 
 // 启动：有 token 则自动加载工作区。
 if (state.token) loadWorkspace().then(render).catch(() => render());

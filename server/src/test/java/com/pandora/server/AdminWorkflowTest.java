@@ -312,6 +312,7 @@ class AdminWorkflowTest {
         mvc.perform(get("/api/admin/highlights").header("Authorization", "Bearer " + employee)).andExpect(status().isForbidden());
         var company = new java.util.HashMap<String, Object>(Map.of("kind", "company", "position", 1, "title", "公司重点", "content", "详细安排", "enabled", true));
         String id = call("POST", "/api/admin/highlights", admin, company).get("id").asText();
+        assertEquals("首页事件纪新增事项", notices(employee, id).getFirst().path("summary").asText());
         mvc.perform(post("/api/admin/highlights").header("Authorization", "Bearer " + founder).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(company))).andExpect(status().isBadRequest());
         for (int position = 2; position <= 10; position++) {
@@ -321,11 +322,14 @@ class AdminWorkflowTest {
         mvc.perform(post("/api/admin/highlights").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(company))).andExpect(status().isBadRequest());
         String personal = call("POST", "/api/admin/highlights", founder, Map.of("kind", "personal", "audience", "employee", "position", 1, "title", "个人重点", "content", "只给本人展示")).get("id").asText();
+        assertEquals(1, notices(employee, personal).size());
+        assertTrue(notices(founder, personal).isEmpty());
         call("POST", "/api/admin/highlights", admin, Map.of("kind", "personal", "audience", "founder", "position", 1, "title", "另一个人的重点", "content", "互不占位"));
         assertTrue(call("GET", "/api/workspace", employee, null).get("db").get("highlights").findValuesAsText("id").contains(personal));
         assertFalse(call("GET", "/api/workspace", founder, null).get("db").get("highlights").findValuesAsText("id").contains(personal));
         company.put("position", 1); company.put("enabled", false);
         call("PUT", "/api/admin/highlights/" + id, founder, company);
+        assertTrue(notices(employee, id).stream().anyMatch(n -> n.path("summary").asText().contains("撤下")));
         assertFalse(call("GET", "/api/workspace", employee, null).get("db").get("highlights").findValuesAsText("id").contains(id));
 
         var values = Map.of("title", "派发重点测试", "owners", new String[]{"founder"}, "dueAt", "2027-01-10T18:00", "priority", "high", "detail", "事务详情");
@@ -336,10 +340,78 @@ class AdminWorkflowTest {
                 .content(json.writeValueAsString(dispatch))).andExpect(status().isBadRequest());
         call("POST", "/api/tasks/requests/" + request.get("id").asText() + "/review", admin, Map.of("approve", true));
         String dispatchId = call("POST", "/api/admin/highlights", admin, dispatch).get("id").asText();
+        assertEquals(1, notices(founder, dispatchId).size());
+        assertTrue(notices(employee, dispatchId).isEmpty(), "unrelated task updates must not leak through messages");
         assertTrue(call("GET", "/api/workspace", founder, null).get("db").get("highlights").findValuesAsText("id").contains(dispatchId));
         assertFalse(call("GET", "/api/workspace", employee, null).get("db").get("highlights").findValuesAsText("id").contains(dispatchId));
+        var disabledDispatch = new java.util.HashMap<String, Object>(dispatch);
+        disabledDispatch.put("enabled", false);
+        call("PUT", "/api/admin/highlights/" + dispatchId, founder, disabledDispatch);
+        assertEquals(2, notices(founder, dispatchId).size());
+        assertTrue(notices(founder, dispatchId).stream().allMatch(n -> n.path("kind").asText().equals("tasks")));
         mvc.perform(delete("/api/admin/highlights/" + id).header("Authorization", "Bearer " + employee)).andExpect(status().isForbidden());
         mvc.perform(delete("/api/admin/highlights/" + id).header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
         assertFalse(call("GET", "/api/admin/highlights", founder, null).findValuesAsText("id").contains(id));
+    }
+
+    private java.util.List<JsonNode> notices(String token, String targetId) throws Exception {
+        return java.util.stream.StreamSupport.stream(call("GET", "/api/workspace", token, null)
+                .path("db").path("notifications").spliterator(), false)
+                .filter(n -> targetId.equals(n.path("targetId").asText())).toList();
+    }
+
+    @Test
+    void taskBoardNotificationsPersistForApprovalProgressCompletionAndDeletion() throws Exception {
+        var values = Map.of("title", "消息通知测试", "owners", new String[]{"employee"}, "dueAt", "2027-01-10T18:00", "priority", "high");
+        JsonNode request = call("POST", "/api/tasks/requests", employee, Map.of("kind", "create", "values", values));
+        String taskId = request.path("taskId").asText();
+        assertTrue(notices(employee, taskId).isEmpty(), "pending applications do not update the task board");
+        call("POST", "/api/tasks/requests/" + request.path("id").asText() + "/review", admin, Map.of("approve", true));
+        assertEquals(1, notices(employee, taskId).size());
+        assertEquals("tasks", notices(employee, taskId).getFirst().path("kind").asText());
+        call("POST", "/api/tasks/" + taskId + "/progress", employee, Map.of("text", "完成第一步"));
+        call("POST", "/api/tasks/" + taskId + "/complete", employee, Map.of());
+        assertEquals(3, notices(employee, taskId).size());
+        assertTrue(notices(employee, taskId).stream().anyMatch(n -> n.path("summary").asText().contains("已完成")));
+        JsonNode deletion = call("POST", "/api/tasks/requests", admin, Map.of("kind", "delete", "taskId", taskId));
+        call("POST", "/api/tasks/requests/" + deletion.path("id").asText() + "/review", founder, Map.of("approve", true));
+        assertEquals(4, notices(employee, taskId).size(), "notifications remain available after the task is removed");
+
+        User next = new User();
+        next.setId("next-owner"); next.setName("下一位负责人"); next.setRole(User.Role.EMPLOYEE);
+        next.setDepartment("其他部门"); next.setPasswordHash(encoder.encode("test-pass-123")); users.saveAndFlush(next);
+        String nextToken = auth.authenticate(next.getName(), "test-pass-123");
+        JsonNode reassigned = call("POST", "/api/tasks/requests", admin, Map.of("kind", "create", "values", values));
+        String reassignedId = reassigned.path("taskId").asText();
+        call("POST", "/api/tasks/requests/" + reassigned.path("id").asText() + "/review", founder, Map.of("approve", true));
+        assertTrue(notices(nextToken, reassignedId).isEmpty());
+        var changed = Map.of("title", "新范围任务名称", "owners", new String[]{next.getId()}, "dueAt", "2027-01-10T18:00", "priority", "high");
+        JsonNode edit = call("POST", "/api/tasks/requests", admin, Map.of("kind", "edit", "taskId", reassignedId, "values", changed));
+        call("POST", "/api/tasks/requests/" + edit.path("id").asText() + "/review", founder, Map.of("approve", true));
+        assertEquals(2, notices(employee, reassignedId).size());
+        assertTrue(notices(employee, reassignedId).stream().noneMatch(n -> n.path("title").asText().equals("新范围任务名称")));
+        assertEquals("新范围任务名称", notices(nextToken, reassignedId).getFirst().path("title").asText());
+    }
+
+    @Test
+    void onlyGlobalRolesCanMaintainSharedTaskTags() throws Exception {
+        JsonNode tag = call("POST", "/api/admin/tags", admin, Map.of("name", "共享业务标签", "color", "#a7bfb4"));
+        String path = "/api/admin/tags/" + tag.path("id").asText();
+        call("PUT", path, founder, Map.of("name", "已更新的共享标签", "color", "#123456"));
+        assertTrue(call("GET", "/api/workspace", employee, null).path("db").path("tags")
+                .findValuesAsText("name").contains("已更新的共享标签"));
+        for (var role : new User.Role[]{User.Role.EMPLOYEE, User.Role.TEAM_LEAD, User.Role.DEPT_MANAGER}) {
+            User u = new User();
+            u.setId("tag-" + role.name()); u.setName("tag-" + role.name()); u.setRole(role);
+            u.setDepartment("研发部"); u.setPasswordHash(encoder.encode("test-pass-123")); users.saveAndFlush(u);
+            String token = auth.authenticate(u.getName(), "test-pass-123");
+            mvc.perform(post("/api/admin/tags").header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"越权\",\"color\":\"#123456\"}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(put(path).header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"越权\"}"))
+                    .andExpect(status().isForbidden());
+        }
+        assertEquals("已更新的共享标签", tags.findById(tag.path("id").asText()).orElseThrow().getName());
     }
 }

@@ -27,6 +27,7 @@ await page.route('**/api/**',async route => {
   const req = route.request(), url = new URL(req.url());
   const respond = (body,status=200) => route.fulfill({status,json:body});
   if(url.pathname.endsWith('/workspace')) return respond({user:current,db});
+  if(url.pathname.endsWith('/tags')) return respond(tags);
   if(url.pathname.endsWith('/logs/history')) { historyCalls++; return failHistory ? respond({error:'历史日志加载失败，请重试'},500) : respond([{id:'old-log',author:'lin',date:'2026-11-01',title:'历史日报',content:'完成历史工作',versions:[]}]); }
   if(url.pathname.endsWith('/logs') && req.method()==='POST') {
     const values = req.postDataJSON().values;
@@ -146,9 +147,32 @@ try {
   await page.locator('[name="decision"][value="approve"]').click();
   await page.locator('.message-list .empty-state').waitFor(); assert.equal(request.status,'approved');
   assert.equal(await page.locator('#modal').evaluate(el => el.open),true);
+  await page.locator('[data-message-filter="results"]').click();
+  assert.equal(await page.locator('.message-item').count(),2,'reviewers see completed requests from other applicants');
+  await page.locator('[data-action="request"][data-id="r1"]').click();
+  assert.match(await page.locator('#modal').innerText(),/审核结果：已通过/);
+  await page.locator('[data-action="messages-return"]').click();
   await page.locator('[data-action="messages-read"]').click(); assert.equal(await page.locator('.message-badge').count(),0);
   await close();
   assert.equal(await page.locator('.dashboard-head [data-action="messages-open"]').evaluate(el => el === document.activeElement),true);
+  db.notifications = [
+    {id:'n1',kind:'events',targetId:'h1',title:'公司事项更新',summary:'首页事件纪已更新',createdAt:'2026-11-11T12:00'},
+    {id:'n2',kind:'tasks',targetId:'t0',title:'任务进展消息',summary:'任务进展已更新',createdAt:'2026-11-11T12:01'}
+  ];
+  await page.reload(); await openMessages();
+  assert.equal(await page.locator('.message-badge').innerText(),'2');
+  await page.locator('[data-message-filter="events"]').click(); assert.equal(await page.locator('.message-item').count(),1);
+  await page.locator('[data-action="notification"]').click();
+  assert.match(await page.locator('#modal').innerText(),/首页事件纪已更新/);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.message-badge').innerText(),'1');
+  await page.locator('[data-message-filter="tasks"]').click(); assert.equal(await page.locator('.message-item').count(),1);
+  await page.locator('[data-action="notification"]').click();
+  assert.equal(await page.locator('#modal [data-action="task"]').count(),1);
+  await page.locator('[data-action="messages-return"]').click();
+  await page.locator('[data-action="messages-read"]').click(); await close();
+  await page.reload(); await page.locator('.dashboard-page').waitFor();
+  assert.equal(await page.locator('.message-badge').count(),0,'read state survives reload');
   own.status='rejected'; own.reviewedAt='2026-11-11T13:00'; own.reason='需补充信息';
   await page.reload(); await openMessages(); assert.equal(await page.locator('.message-badge').innerText(),'1');
   await close();
@@ -159,7 +183,16 @@ try {
   assert.match(await page.locator('.log-results').innerText(),/周一鸣/);
   assert.doesNotMatch(await page.locator('.log-results').innerText(),/陈嘉宁|系统管理员/);
   await page.locator('[data-action="clear-log-filters"]').click();
-  await page.locator('[name="tag"]').selectOption('urgent'); assert.equal(await page.locator('.log-results .log-card').count(),0);
+  assert.equal(await page.locator('.log-filter [name="tag"], .log-filter [name="task"]').count(),0);
+  await page.locator('[name="department"]').selectOption('产品设计部');
+  await page.locator('[name="author"]').selectOption('lin');
+  await page.locator('[name="role"]').selectOption('TEAM_LEAD');
+  assert.equal(await page.locator('[name="author"]').inputValue(),'');
+  assert.deepEqual(await page.locator('[name="author"] option').evaluateAll(els => els.map(el => el.value)),['','zhou']);
+  assert.equal(await page.locator('.log-results .log-card').count(),0);
+  assert.match(await page.locator('.log-submission').innerText(),/0 \/ 1/);
+  await page.locator('[name="role"]').selectOption('EMPLOYEE');
+  assert.deepEqual(await page.locator('[name="author"] option').evaluateAll(els => els.map(el => el.value)),['','lin']);
   await page.locator('[data-action="clear-log-filters"]').click();
   failHistory=true; await page.locator('[data-log-range="all"]').click();
   await page.locator('[data-action="retry-log-history"]').waitFor(); failHistory=false;

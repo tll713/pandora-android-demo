@@ -31,6 +31,7 @@ public class ApiController {
     private final com.pandora.server.repository.LogCommentRepository logCommentRepository;
     private final TodoService todoService;
     private final OperationLogService operationLogService;
+    private final NotificationService notificationService;
 
     public ApiController(AuthService authService, UserService userService, TaskService taskService,
                          LogService logService, AnnouncementService announcementService, HighlightService highlightService,
@@ -42,7 +43,7 @@ public class ApiController {
                          com.pandora.server.repository.WorkLogRepository workLogRepository,
                          com.pandora.server.repository.TagRepository tagRepository,
                          com.pandora.server.repository.LogCommentRepository logCommentRepository,
-                         TodoService todoService, OperationLogService operationLogService) {
+                         TodoService todoService, OperationLogService operationLogService, NotificationService notificationService) {
         this.authService = authService;
         this.userService = userService;
         this.taskService = taskService;
@@ -59,6 +60,7 @@ public class ApiController {
         this.logCommentRepository = logCommentRepository;
         this.todoService = todoService;
         this.operationLogService = operationLogService;
+        this.notificationService = notificationService;
     }
 
     /** 记录操作流水，失败不影响主流程。 */
@@ -205,6 +207,7 @@ public class ApiController {
         db.put("requests", requests.stream().map(this::requestToMap).collect(Collectors.toList()));
         db.put("announcements", announcements.stream().map(this::announcementToMap).collect(Collectors.toList()));
         db.put("highlights", highlightService.visibleTo(user, tasks));
+        db.put("notifications", notificationService.listOwn(user.getId()));
         db.put("pins", Map.of(user.getId(), pins));
         db.put("members", visibleUsers.stream().map(this::userToMap).collect(Collectors.toList()));
         db.put("allowedAssignees", allowedAssignees.stream().map(this::userToMap).collect(Collectors.toList()));

@@ -250,6 +250,18 @@ CREATE TABLE IF NOT EXISTS operation_logs (
   INDEX idx_operation_actor (actor_id)
 );
 
+-- 首页内容更新消息，按接收成员和时间查询。
+CREATE TABLE IF NOT EXISTS workspace_notifications (
+  id VARCHAR(60) PRIMARY KEY,
+  recipient_id VARCHAR(30) NOT NULL,
+  kind VARCHAR(16) NOT NULL,
+  target_id VARCHAR(60) NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  summary VARCHAR(160) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_notification_recipient (recipient_id, created_at)
+);
+
 -- 标签按紧急程度着色：URGENT / IMPORTANT / NORMAL / LONGTERM
 SET @pandora_ddl = IF(
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tags' AND column_name = 'urgency') = 0,

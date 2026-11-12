@@ -14,9 +14,13 @@ public class HighlightService {
     private final HighlightRepository highlights;
     private final UserRepository users;
     private final TaskRepository tasks;
+    private final TaskService taskService;
+    private final NotificationService notifications;
 
-    public HighlightService(HighlightRepository highlights, UserRepository users, TaskRepository tasks) {
+    public HighlightService(HighlightRepository highlights, UserRepository users, TaskRepository tasks,
+                            TaskService taskService, NotificationService notifications) {
         this.highlights = highlights; this.users = users; this.tasks = tasks;
+        this.taskService = taskService; this.notifications = notifications;
     }
 
     public List<Highlight> getAll() { return highlights.findAllByOrderByPositionAscIdAsc(); }
@@ -58,15 +62,36 @@ public class HighlightService {
         if (id == null) h.setId("hl-" + UUID.randomUUID());
         if (highlights.existsByKindAndAudienceAndPositionAndIdNot(input.kind(), audience, input.position(), h.getId()))
             throw new IllegalArgumentException("该展示位置已被占用，请编辑原内容或选择其他位置");
+        Set<String> recipients = id == null ? new HashSet<>() : audienceOf(h);
+        String previousTitle = h.getTitle();
+        String previousKind = h.getKind();
         h.setKind(input.kind()); h.setAudience(audience); h.setPosition(input.position());
         h.setTitle(input.title().trim()); h.setContent(input.content().trim()); h.setTaskId(taskId);
         h.setEnabled(!Boolean.FALSE.equals(input.enabled()));
-        return highlights.saveAndFlush(h);
+        Highlight saved = highlights.saveAndFlush(h);
+        // Notify former audiences without exposing content newly assigned to another audience.
+        Set<String> current = audienceOf(saved);
+        Set<String> removed = new HashSet<>(recipients);
+        removed.removeAll(current);
+        if (!removed.isEmpty()) notifications.publish(removed, "dispatch".equals(previousKind) ? "tasks" : "events", h.getId(), previousTitle, "首页事项已撤下或调整展示范围");
+        if (!current.isEmpty()) notifications.publish(current, h.getKind().equals("dispatch") ? "tasks" : "events",
+                h.getId(), h.getTitle(), h.getKind().equals("dispatch") ? "首页派发任务已更新" : id == null ? "首页事件纪新增事项" : "首页事件纪已更新");
+        return saved;
     }
 
     @Transactional
     public void delete(String id) {
         Highlight h = highlights.findById(id).orElseThrow(() -> new IllegalArgumentException("内容不存在"));
+        notifications.publish(audienceOf(h), h.getKind().equals("dispatch") ? "tasks" : "events", h.getId(), h.getTitle(), "首页事项已删除");
         highlights.delete(h);
+    }
+
+    private Set<String> audienceOf(Highlight h) {
+        if (!h.isEnabled()) return new HashSet<>();
+        Task task = h.getKind().equals("dispatch") ? tasks.findById(h.getTaskId()).orElse(null) : null;
+        return users.findAll().stream().filter(User::isEnabled)
+                .filter(u -> !h.getKind().equals("personal") || h.getAudience().equals(u.getId()))
+                .filter(u -> !h.getKind().equals("dispatch") || taskService.canSeeTask(u, task))
+                .map(User::getId).collect(Collectors.toCollection(HashSet::new));
     }
 }

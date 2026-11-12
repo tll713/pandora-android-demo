@@ -324,14 +324,13 @@ public class DataSeeder implements ApplicationRunner {
         }
     }
 
-    /** 把内置标签的颜色恢复成各自独立配色（曾按紧急程度统一过颜色的库需要修一次）。 */
+    /** 只补齐缺失颜色，保留管理员或创始人保存的自定义配色。 */
     private void seedTagColors() {
-        java.util.Set<String> shared = java.util.Set.of("#e0574d", "#e39a45", "#4f8fbd", "#a7bfb4");
         for (com.pandora.server.model.Tag tag : tagRepository.findAll()) {
             String color = TAG_COLORS.get(tag.getId());
             if (color == null) continue;
             String current = tag.getColor() == null ? "" : tag.getColor().toLowerCase();
-            if (!color.equals(current) && (current.isEmpty() || shared.contains(current))) {
+            if (current.isEmpty()) {
                 tag.setColor(color);
                 tagRepository.save(tag);
             }

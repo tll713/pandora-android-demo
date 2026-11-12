@@ -679,6 +679,15 @@ body.dashboard-active .app-shell { height:auto; min-height:100dvh; }
 .tag-choice:has(input:checked) { outline:2px solid #637f9f; outline-offset:1px; }
 .modal-form .tag-choice input { width:14px; height:14px; margin:0; padding:0; accent-color:#527aab; }
 .tag-choice i { width:8px; height:8px; border-radius:50%; }
+.tag-tools { display:flex; align-items:flex-start; flex-wrap:wrap; gap:12px; width:100%; padding-top:8px; border-top:1px solid var(--line); }
+.tag-tools details { min-width:0; flex:1; }
+.tag-tools summary { padding:10px 0; cursor:pointer; font-size:12px; color:var(--green); }
+.tag-management { display:grid; gap:8px; padding:8px 0; }
+.tag-management > div { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.tag-editor { display:grid; gap:12px; width:100%; min-width:0; padding:14px 0 0; border-top:1px solid var(--line); }
+.tag-editor[hidden] { display:none; }
+.tag-editor input[type="color"] { width:72px; min-height:44px; padding:4px; }
+.tag-editor-actions { display:flex; justify-content:flex-end; gap:8px; }
 .message-summary { display:flex; flex-wrap:wrap; gap:24px; padding:20px; background:white; border:1px solid var(--line); border-radius:8px; margin-bottom:16px; }
 .message-summary span { display:grid; gap:8px; font-size:12px; color:var(--muted); }
 .message-summary b { font-size:24px; color:var(--ink); }

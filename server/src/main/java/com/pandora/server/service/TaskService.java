@@ -19,10 +19,12 @@ public class TaskService {
     private final UserRepository userRepository;
     private final PinRepository pinRepository;
     private final TagRepository tagRepository;
+    private final NotificationService notifications;
 
     public TaskService(TaskRepository taskRepository, TaskOwnerRepository taskOwnerRepository,
                        TaskHistoryRepository taskHistoryRepository, ChangeRequestRepository changeRequestRepository,
-                       UserRepository userRepository, PinRepository pinRepository, TagRepository tagRepository) {
+                       UserRepository userRepository, PinRepository pinRepository, TagRepository tagRepository,
+                       NotificationService notifications) {
         this.taskRepository = taskRepository;
         this.taskOwnerRepository = taskOwnerRepository;
         this.taskHistoryRepository = taskHistoryRepository;
@@ -30,6 +32,7 @@ public class TaskService {
         this.userRepository = userRepository;
         this.pinRepository = pinRepository;
         this.tagRepository = tagRepository;
+        this.notifications = notifications;
     }
 
     // ============ 查询 ============
@@ -204,14 +207,20 @@ public class TaskService {
                 task.setCreatedAt(req.getCreatedAt());
                 taskRepository.save(task);
                 for (String oid : (List<String>) after.get("owners")) {
-                    taskOwnerRepository.save(new TaskOwner(task, userRepository.findById(oid).orElseThrow()));
+                    task.getOwners().add(taskOwnerRepository.save(new TaskOwner(task, userRepository.findById(oid).orElseThrow())));
                 }
                 addHistory(task, reviewer.getId(), "审核通过，任务创建生效");
+                Set<String> recipients = new HashSet<>((List<String>) after.get("owners"));
+                recipients.add(req.getProposerId());
+                recipients.addAll(taskAudience(task));
+                notifications.publish(recipients, "tasks", task.getId(), task.getTitle(), "任务看板新增任务，创建申请已通过");
             } else {
                 Task task = taskRepository.findById(req.getTaskId())
                         .orElseThrow(() -> new IllegalArgumentException("任务不存在"));
                 if (task.getDeleted() || !task.getRevision().equals(req.getExpectedRevision()))
                     throw new IllegalArgumentException("任务已发生变化，请驳回并重新申请");
+                Set<String> recipients = taskAudience(task);
+                String previousTitle = task.getTitle();
                 if (req.getKind() == ChangeRequest.Kind.EDIT) {
                     Map<String, Object> after = fromJson(req.getAfterJson());
                     task.setTitle((String) after.get("title"));
@@ -227,7 +236,7 @@ public class TaskService {
                     task.getOwners().clear();
                     taskOwnerRepository.flush();
                     for (String oid : (List<String>) after.get("owners")) {
-                        taskOwnerRepository.save(new TaskOwner(task, userRepository.findById(oid).orElseThrow()));
+                        task.getOwners().add(taskOwnerRepository.save(new TaskOwner(task, userRepository.findById(oid).orElseThrow())));
                     }
                     addHistory(task, reviewer.getId(), "任务编辑审核通过");
                 } else {
@@ -236,6 +245,14 @@ public class TaskService {
                     addHistory(task, reviewer.getId(), "任务删除审核通过，记录归档");
                 }
                 taskRepository.save(task);
+                if (req.getKind() == ChangeRequest.Kind.EDIT) {
+                    Set<String> current = taskAudience(task);
+                    recipients.removeAll(current);
+                    notifications.publish(recipients, "tasks", task.getId(), previousTitle, "任务负责人或查看范围已调整，任务已从你的看板移除");
+                    notifications.publish(current, "tasks", task.getId(), task.getTitle(), "任务看板已更新，任务修改申请已通过");
+                } else {
+                    notifications.publish(recipients, "tasks", task.getId(), task.getTitle(), "任务已从看板移除，删除申请已通过");
+                }
             }
         }
         req.setStatus(approve ? ChangeRequest.Status.APPROVED : ChangeRequest.Status.REJECTED);
@@ -257,6 +274,7 @@ public class TaskService {
         if (text.length() > 1000) throw new IllegalArgumentException("进展内容不能超过 1000 个字");
         task.setStatus(Task.Status.DOING);
         addHistory(task, user.getId(), "工作进展：" + text);
+        notifications.publish(taskAudience(task), "tasks", task.getId(), task.getTitle(), "任务进展已更新");
         return taskRepository.save(task);
     }
 
@@ -268,6 +286,7 @@ public class TaskService {
         task.setStatus(Task.Status.DONE);
         task.setCompletedAt(LocalDateTime.now());
         addHistory(task, user.getId(), "标记任务完成，无需审核");
+        notifications.publish(taskAudience(task), "tasks", task.getId(), task.getTitle(), "任务已完成，任务看板已更新");
         return taskRepository.save(task);
     }
 
@@ -296,6 +315,11 @@ public class TaskService {
     }
 
     // ============ 辅助 ============
+
+    private Set<String> taskAudience(Task task) {
+        return userRepository.findAll().stream().filter(User::isEnabled).filter(u -> canSeeTask(u, task))
+                .map(User::getId).collect(Collectors.toCollection(HashSet::new));
+    }
 
     private void applyTaskTag(Task task, Map<String, Object> after) {
         // Older pending requests omit tagId and must retain the existing tag.
