@@ -19,6 +19,7 @@
   const pages = {
     users:['组织与账号','ORGANIZATION & ACCOUNTS','管理公司成员、部门与账号'],
     logs:['系统日志','SYSTEM LOGS','按时间线查看全体成员在 App 里的每一步操作'],
+    announcements:['公司公告','ANNOUNCEMENTS','发布、编辑和置顶公司通知'],
     highlights:['十大内容','TOP TEN HIGHLIGHTS','录入与维护 App 首页的公司事项、派发任务和个人事项']
   };
   const highlightKinds={company:'公司十大重要事项',dispatch:'公司十大派发任务',personal:'个人十大重要事项'};
@@ -74,11 +75,11 @@
     state.loading=true; state.error=''; render();
     $('refresh-btn').disabled=true;
     try {
-      const [users,highlights,tasks,operations]=await Promise.all([
-        api('/admin/users'),api('/admin/highlights'),api('/admin/tasks'),api('/admin/operations')
+      const [users,highlights,tasks,operations,announcements]=await Promise.all([
+        api('/admin/users'),api('/admin/highlights'),api('/admin/tasks'),api('/admin/operations'),api('/announcements')
       ]);
       if(session!==state.session || load!==state.load) return;
-      state.data={users,highlights,tasks,operations};
+      state.data={users,highlights,tasks,operations,announcements};
       $('refresh-time').textContent='更新于 '+new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
     } catch(error) { if(session===state.session && load===state.load) state.error=error.message; }
     finally {
@@ -89,7 +90,8 @@
     if(!pages[page]) page='users';
     state.page=page;
     if(updateHash && location.hash!=='#'+page) history.pushState(null,'','#'+page);
-    $('app-view').classList.remove('menu-open'); render();
+    $('app-view').classList.remove('menu-open');
+    render();
   }
   window.addEventListener('hashchange',()=>{if(state.user) navigate(location.hash.slice(1),false);});
   window.addEventListener('popstate',()=>{if(state.user) navigate(location.hash.slice(1),false);});
@@ -104,7 +106,7 @@
     const meta=pages[state.page];
     $('breadcrumb-title').textContent=meta[0]; $('page-title').textContent=meta[0]; $('page-kicker').textContent=meta[1]; $('page-description').textContent=meta[2];
     const primary=$('primary-action');
-    const primaryMap={users:['new-user','添加成员'],highlights:['new-highlight','录入十大内容']};
+    const primaryMap={users:['new-user','添加成员'],announcements:['new-announcement','发布公告'],highlights:['new-highlight','录入十大内容']};
     const next=primaryMap[state.page];
     primary.hidden=!next || (state.page==='users' && state.user.role!=='ADMIN');
     primary.disabled=state.loading || !!state.error || !state.data;
@@ -112,7 +114,7 @@
     if(state.loading) {$('page-content').innerHTML='<div class="loading-state"><span class="spinner"></span>正在加载管理数据…</div>';return;}
     if(state.error) {$('page-content').innerHTML='<section class="panel">'+empty('数据加载失败',state.error,'refresh','重新加载')+'</section>';return;}
     if(!state.data) return;
-    $('page-content').innerHTML=({users:usersPage,logs:logsPage,highlights:highlightsPage})[state.page]();
+    $('page-content').innerHTML=({users:usersPage,logs:logsPage,announcements:announcementsPage,highlights:highlightsPage})[state.page]();
   }
   function empty(title='暂无匹配结果',description='试试调整筛选条件，或稍后再来查看。',button='',label='') {
     return '<div class="empty-state"><div class="empty-icon">'+icon(state.page)+'</div><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p>'+(button?action(button,'',esc(label),'btn'):'')+'</div>';
@@ -153,6 +155,22 @@
     '每日事项':['新增每日事项','完成每日事项','恢复每日事项'],
     '账号':['创建成员','重置密码','修改密码']
   };
+  function announcementsPage() {
+    const f=filters();
+    const list=state.data.announcements.filter(a=>searchMatch(a.title+' '+a.content)&&(!f.category||a.category===f.category))
+      .sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.date.localeCompare(a.date));
+    const p=paginated(list);
+    return toolbar(selectFilter('category','分类',[...new Set(state.data.announcements.map(a=>a.category))].sort().map(c=>[c,c])))+
+      table('公司公告',['标题','分类','日期','状态','操作'],p.items.map(a=>cell(action('announcement-detail',a.id,esc(a.title)))+cell(esc(a.category))+cell(esc(a.date))+cell(tag(a.pinned?'已置顶':'普通',a.pinned?'amber':''))+cell('<div class="row-actions">'+action('edit-announcement',a.id,'编辑')+action('toggle-announcement',a.id,a.pinned?'取消置顶':'置顶')+action('delete-announcement',a.id,'删除','row-link danger')+'</div>')),list.length,p.footer);
+  }
+  function announcementForm(id='') {
+    const a=state.data.announcements.find(a=>a.id===id);
+    openDialog(a?'编辑公告':'发布公告','<form id="announcement-form"><div class="form-grid"><label class="full">标题<input name="title" required maxlength="120" value="'+esc(a?.title||'')+'"></label><label>分类<input name="category" required maxlength="40" value="'+esc(a?.category||'通知')+'"></label><label class="full">正文<textarea name="content" required maxlength="20000" rows="8">'+esc(a?.content||'')+'</textarea></label><label class="check-label full"><input type="checkbox" name="pinned" '+(a?.pinned?'checked':'')+'>置顶公告</label></div>'+formActions(a?'保存修改':'发布公告')+'</form>','ANNOUNCEMENT',{type:'announcement-form',id});
+  }
+  function announcementDetail(id) {
+    const a=state.data.announcements.find(a=>a.id===id);
+    if(a) openDialog(a.title,detailGrid([['分类',a.category],['日期',a.date],['状态',a.pinned?'已置顶':'普通']])+'<div class="prose">'+esc(a.content)+'</div>','ANNOUNCEMENT');
+  }
   const operationColor = action => action==='评价日志'?'purple':action==='完成任务'?'green':operationGroups['任务'].includes(action)?'amber':operationGroups['日志'].includes(action)?'blue':'';
   const clockOf = value => String(value||'').replace('T',' ').slice(5,16);
   function logsPage() {
@@ -287,6 +305,17 @@
       if(name.startsWith('go-')) return navigate(name.slice(3));
       if(!state.data) return;
       if(name==='new-user') return userForm();
+      if(name==='new-announcement') return announcementForm();
+      if(name==='edit-announcement') return announcementForm(id);
+      if(name==='announcement-detail') return announcementDetail(id);
+      if(name==='toggle-announcement') {
+        const a=state.data.announcements.find(a=>a.id===id);
+        return void mutate(()=>api('/admin/announcements/'+encodeURIComponent(id),{method:'PUT',body:{...a,pinned:!a.pinned}}),a.pinned?'已取消置顶':'公告已置顶');
+      }
+      if(name==='delete-announcement') {
+        const a=state.data.announcements.find(a=>a.id===id);
+        return confirmAction('删除这条公告？','“'+a.title+'”将从公司公告中移除。',()=>mutate(()=>api('/admin/announcements/'+encodeURIComponent(id),{method:'DELETE'}),'公告已删除'),true);
+      }
       if(name==='pick-audience') {filters().audience=id; render(); return;}
       if(name==='new-highlight') {slotDraft=button.dataset.slot||filters().slot||'';return highlightForm();}
       if(name==='fill-slot') {slotDraft=button.dataset.slot||'';return highlightForm();}
@@ -326,7 +355,7 @@
   }
   document.addEventListener('submit',event=>{
     const form=event.target;
-    if(!['login-form','filter-form','user-form','password-form','highlight-form','confirm-form'].includes(form.id)) return;
+    if(!['login-form','filter-form','user-form','password-form','highlight-form','announcement-form','confirm-form'].includes(form.id)) return;
     event.preventDefault();
     if(form.id==='login-form') return;
     if(state.busy) return;
@@ -334,6 +363,10 @@
     if(form.id==='confirm-form') return void confirmCallback?.();
     const data=Object.fromEntries(new FormData(form)),id=dialogContext?.id;
     try {
+      if(form.id==='announcement-form') {
+        const body={title:data.title.trim(),category:data.category.trim(),content:data.content.trim(),pinned:data.pinned==='on'};
+        return void mutate(()=>api('/admin/announcements'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'公告已更新':'公告已发布');
+      }
       if(form.id==='highlight-form') {
         const body={kind:data.kind,audience:data.audience||'',position:Number(data.position),taskId:data.taskId||null,title:data.title.trim(),content:data.content.trim(),enabled:data.enabled==='on'};
         return void mutate(()=>api('/admin/highlights'+(id?'/'+encodeURIComponent(id):''),{method:id?'PUT':'POST',body}),id?'十大内容已更新':'十大内容已保存');

@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const require = createRequire(import.meta.url);
-const runtime = process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules');
-const { chromium } = require(path.join(runtime, 'playwright'));
-const browser = await chromium.launch({ channel: process.env.PANDORA_BROWSER_CHANNEL || 'msedge', headless: true });
+import { chromium, browserChannel } from '../../scripts/browser-test.mjs';
+const browser = await chromium.launch({ channel: browserChannel, headless: true });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
@@ -27,6 +23,8 @@ const tasks = [...tags.map(tag => ({ id: tag.id, tagId: tag.id })), { id: 'untag
 const db = { members: [member,founder,employee], tasks, tags, logs: [], requests: [], announcements: [], highlights: [], pins: {} };
 await page.clock.install({ time: new Date('2026-11-03T12:00:00+08:00') });
 await page.route('**/api/**', route => {
+  const calendarUrl = new URL(route.request().url());
+  if (calendarUrl.pathname === '/api/calendar/metadata') return route.fulfill({json:{year:Number(calendarUrl.searchParams.get('year')),published:false,source:'',holidays:{},solarTerms:{}}});
   const req = route.request(), url = new URL(req.url()), reply = (json,status=200) => route.fulfill({status,json});
   if(url.pathname.endsWith('/auth/login')) return reply({token:'tag-ui-token',user:current});
   if(url.pathname.endsWith('/workspace')) return reply({user:current,db});

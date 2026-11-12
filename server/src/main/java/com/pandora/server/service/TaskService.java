@@ -95,7 +95,7 @@ public class TaskService {
 
         Task task = null;
         if (!"create".equals(kind)) {
-            task = getTask(taskId);
+            task = lockTask(taskId);
             if (task == null) throw new IllegalArgumentException("任务不存在");
             if (!canManageTask(proposer, task)) throw new IllegalArgumentException("没有修改这项任务的权限");
             if (changeRequestRepository.existsByTaskIdAndStatus(taskId, ChangeRequest.Status.PENDING))
@@ -180,7 +180,7 @@ public class TaskService {
 
     @Transactional
     public ChangeRequest reviewTaskChange(User reviewer, String requestId, boolean approve, String reason) {
-        ChangeRequest req = changeRequestRepository.findById(requestId)
+        ChangeRequest req = changeRequestRepository.findForUpdate(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("申请不存在"));
         if (!canReviewRequest(reviewer, req)) throw new IllegalArgumentException("需由另一位管理员或创始人审核待处理申请");
         String note = approve ? (reason == null ? "" : reason.trim()) : 
@@ -215,7 +215,7 @@ public class TaskService {
                 recipients.addAll(taskAudience(task));
                 notifications.publish(recipients, "tasks", task.getId(), task.getTitle(), "任务看板新增任务，创建申请已通过");
             } else {
-                Task task = taskRepository.findById(req.getTaskId())
+                Task task = taskRepository.findForUpdate(req.getTaskId())
                         .orElseThrow(() -> new IllegalArgumentException("任务不存在"));
                 if (task.getDeleted() || !task.getRevision().equals(req.getExpectedRevision()))
                     throw new IllegalArgumentException("任务已发生变化，请驳回并重新申请");
@@ -266,7 +266,7 @@ public class TaskService {
 
     @Transactional
     public Task updateTaskDetail(User user, String taskId, String note) {
-        Task task = getTask(taskId);
+        Task task = lockTask(taskId);
         if (!canWorkOnTask(user, task)) throw new IllegalArgumentException("只有任务负责人可以记录进展");
         if (task.getStatus() == Task.Status.DONE) throw new IllegalArgumentException("已完成任务不能继续记录进展");
         String text = note == null ? "" : note.trim();
@@ -280,7 +280,7 @@ public class TaskService {
 
     @Transactional
     public Task completeTask(User user, String taskId) {
-        Task task = getTask(taskId);
+        Task task = lockTask(taskId);
         if (!canWorkOnTask(user, task)) throw new IllegalArgumentException("只有任务负责人可以完成任务");
         if (task.getStatus() == Task.Status.DONE) throw new IllegalArgumentException("任务已经完成");
         task.setStatus(Task.Status.DONE);
@@ -315,6 +315,10 @@ public class TaskService {
     }
 
     // ============ 辅助 ============
+
+    private Task lockTask(String taskId) {
+        return taskRepository.findForUpdate(taskId).filter(t -> !t.getDeleted()).orElse(null);
+    }
 
     private Set<String> taskAudience(Task task) {
         return userRepository.findAll().stream().filter(User::isEnabled).filter(u -> canSeeTask(u, task))

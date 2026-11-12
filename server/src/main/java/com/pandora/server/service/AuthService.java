@@ -3,7 +3,6 @@ package com.pandora.server.service;
 import com.pandora.server.model.User;
 import com.pandora.server.repository.UserRepository;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -31,6 +30,8 @@ public class AuthService {
                        @Value("${jwt.expiration}") long expiration) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32)
+            throw new IllegalStateException("请设置至少 32 字节的随机 PANDORA_JWT_SECRET");
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expiration = expiration;
     }
@@ -52,40 +53,13 @@ public class AuthService {
         }
         User matched = null;
         for (User candidate : candidates) {
-            if (candidate.isEnabled() && passwordEncoder.matches(rawPassword, candidate.getPasswordHash())) {
+            if (candidate.isOrganizationMember() && passwordEncoder.matches(rawPassword, candidate.getPasswordHash())) {
                 if (matched != null) throw new IllegalArgumentException("手机号/姓名或密码错误");
                 matched = candidate;
             }
         }
         if (matched == null) throw new IllegalArgumentException("手机号/姓名或密码错误");
         return new LoginResult(generateToken(matched), matched);
-    }
-
-    /** 手机号注册：创建普通员工账号，资料待完善 */
-    public LoginResult register(String phone, String rawPassword, String name) {
-        if (phone == null || phone.isBlank())
-            throw new IllegalArgumentException("请填写手机号");
-        String normalized = phone.trim().replaceAll("[\\s()-]", "");
-        if (!normalized.matches("^1[3-9]\\d{9}$"))
-            throw new IllegalArgumentException("请输入有效的 11 位手机号");
-        if (userRepository.existsByPhone(normalized))
-            throw new IllegalArgumentException("该手机号已注册，请直接登录");
-        if (rawPassword == null || rawPassword.length() < 6 || rawPassword.length() > 64)
-            throw new IllegalArgumentException("密码需为 6～64 位字符");
-        String displayName = (name != null && !name.isBlank()) ? name.trim() : "用户" + normalized.substring(normalized.length() - 4);
-        if (displayName.length() > 30) displayName = displayName.substring(0, 30);
-
-        User u = new User();
-        u.setId(java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 30));
-        u.setName(displayName);
-        u.setPhone(normalized);
-        u.setDepartment("待分配");
-        u.setRole(User.Role.EMPLOYEE);
-        u.setAvatar(displayName.substring(displayName.length() - 1));
-        u.setColor("blue");
-        u.setPasswordHash(passwordEncoder.encode(rawPassword));
-        userRepository.save(u);
-        return new LoginResult(generateToken(u), u);
     }
 
     private String generateToken(User user) {
@@ -110,7 +84,7 @@ public class AuthService {
             var claims = Jwts.parser().verifyWith(secretKey).build()
                     .parseSignedClaims(token).getPayload();
             User user = userRepository.findById(claims.getSubject()).orElse(null);
-            return user != null && user.isEnabled() && credentialStamp(user).equals(claims.get("credentials", String.class))
+            return user != null && user.isOrganizationMember() && credentialStamp(user).equals(claims.get("credentials", String.class))
                     ? user.getId() : null;
         } catch (Exception e) {
             return null;

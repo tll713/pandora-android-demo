@@ -30,8 +30,8 @@ public final class MainActivity extends Activity {
     private static final int AVATAR_REQUEST = 101;
     private static final String ORIGIN = "appassets.androidplatform.net";
     private static final Set<String> FILES = new HashSet<>(Arrays.asList("index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/style.css", "src/mobile.css"));
-    // 后端地址（电脑的局域网 IP+端口），由应用注入页面。
-    private static final String API_BASE = "http://10.17.147.160:8080/api";
+    // Generated from the build configuration; release builds require HTTPS.
+    private static final String API_BASE = BuildConfig.API_BASE;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -54,7 +54,7 @@ public final class MainActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setMixedContentMode(BuildConfig.ALLOW_HTTP ? WebSettings.MIXED_CONTENT_ALWAYS_ALLOW : WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.5.8");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
@@ -74,15 +74,13 @@ public final class MainActivity extends Activity {
         });
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                return false;
+                return !isLocal(req.getUrl());
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
                 Uri url = req.getUrl();
-                // 本地资源由本应用提供；网络请求（后端 API）交给系统网络栈处理，
-                // 这样用户在登录页修改服务器地址后也能正常访问
+                // 本地资源由本应用提供；只允许构建时指定的 API 来源。
                 if (!isLocal(url)) {
-                    String scheme = url.getScheme();
-                    if ("http".equals(scheme) || "https".equals(scheme)) return null;
+                    if (apiOrigin().equals(url.getScheme() + "://" + url.getAuthority())) return null;
                     return response(403, "Forbidden", "text/plain", "External requests disabled");
                 }
                 String path = req.getUrl().getPath();
@@ -91,7 +89,7 @@ public final class MainActivity extends Activity {
                 try {
                     String mime = file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html";
                     Map<String, String> headers = new HashMap<>();
-                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https:; object-src 'none'; base-uri 'self'";
+                    String csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " + apiOrigin() + "; object-src 'none'; base-uri 'self'";
                     InputStream body;
                     if (file.equals("index.html")) {
                         // 在页面脚本执行前注入 API 基地址；nonce 保证 CSP 下仅这段内联脚本可执行
@@ -117,7 +115,8 @@ public final class MainActivity extends Activity {
         });
         web.loadUrl("https://" + ORIGIN + "/index.html");
     }
-    private boolean isLocal(Uri url) { return "https".equals(url.getScheme()) && ORIGIN.equals(url.getHost()); }
+    private String apiOrigin() { Uri api = Uri.parse(API_BASE); return api.getScheme() + "://" + api.getAuthority(); }
+    private boolean isLocal(Uri url) { return "https".equals(url.getScheme()) && ORIGIN.equals(url.getHost()) && (url.getPort() == -1 || url.getPort() == 443); }
     /** 读取系统栏高度，取不到时使用兜底值 */
     private int systemBarHeight(String name, int fallback) {
         try {

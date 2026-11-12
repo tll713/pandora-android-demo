@@ -16,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.Map;
 
@@ -31,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.jpa.show-sql=false", "debug=false", "logging.level.root=WARN", "logging.level.org.hibernate.SQL=WARN"
 })
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class AdminWorkflowTest {
     @Autowired MockMvc mvc;
     @Autowired UserRepository users;

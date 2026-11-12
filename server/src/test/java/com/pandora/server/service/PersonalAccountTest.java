@@ -62,6 +62,7 @@ class PersonalAccountTest {
         assertEquals(user.getId(), auth.validateToken(auth.authenticate("138 0013 8000", "old-pass-123")));
         assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getId(), "old-pass-123"));
         User namesake = new User(); namesake.setId("namesake"); namesake.setName(user.getName()); namesake.setRole(User.Role.EMPLOYEE);
+        namesake.setDepartment(user.getDepartment());
         namesake.setPasswordHash(encoder.encode("another-pass-123"));
         when(users.findByName(user.getName())).thenReturn(List.of(user, namesake));
         assertEquals(user.getId(), auth.validateToken(auth.authenticate(user.getName(), "old-pass-123")));
@@ -69,6 +70,18 @@ class PersonalAccountTest {
         assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getName(), "old-pass-123"));
         user.setEnabled(false);
         assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getPhone(), "old-pass-123"));
+    }
+
+    @Test
+    void unassignedAccountsCannotLoginOrReuseTokens() {
+        User user = user();
+        AuthService auth = new AuthService(users, encoder, "a-test-secret-with-at-least-32-bytes-long", 3600000);
+        String token = auth.authenticate(user.getName(), "old-pass-123");
+        for (String department : new String[]{"待分配", "", null}) {
+            user.setDepartment(department);
+            assertThrows(IllegalArgumentException.class, () -> auth.authenticate(user.getName(), "old-pass-123"));
+            assertNull(auth.validateToken(token));
+        }
     }
 
     @Test

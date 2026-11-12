@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -32,6 +33,9 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    @Value("${pandora.security.require-https:true}")
+    private boolean requireHttps;
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -44,7 +48,7 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
                         .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "FOUNDER")
                         .requestMatchers("/", "/index.html", "/style.css", "/app.js", "/favicon.svg", "/src/**", "/assets/**").permitAll()
                         .anyRequest().authenticated()
@@ -61,6 +65,7 @@ public class SecurityConfig {
                             res.getWriter().write("{\"error\":\"仅管理员和创始人可访问管理后台\"}");
                         }))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+        if (requireHttps) http.requiresChannel(channel -> channel.anyRequest().requiresSecure());
         return http.build();
     }
 

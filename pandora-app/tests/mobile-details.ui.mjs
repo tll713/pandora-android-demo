@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const require = createRequire(import.meta.url);
-const { chromium } = require(path.join(process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'), 'playwright'));
-const browser = await chromium.launch({channel:process.env.PANDORA_BROWSER_CHANNEL || 'msedge',headless:true});
+import { chromium, browserChannel } from '../../scripts/browser-test.mjs';
+const browser = await chromium.launch({channel:browserChannel,headless:true});
 const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2,
   userAgent:'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36 PandoraAndroid/0.5.4',locale:'zh-CN',timezoneId:'Asia/Shanghai'});
 const page = await context.newPage(), errors = [];
@@ -21,6 +18,8 @@ const db = {members:[member,colleague],tasks,tags:[],todos:Array.from({length:6}
   highlights:Array.from({length:10},(_,i) => ({id:`h${i}`,kind:'company',position:i+1,title:`公司事件 ${i+1}`,content:longText,enabled:true})),
   logs:[{id:'log1',author:'lin',date:today,title:'交付与协作日报',content:longText,taskId:'task0',versions:[{title:'初稿',content:longText,at:`${today}T09:00`}]}]};
 await page.route('**/api/**',route => {
+  const calendarUrl = new URL(route.request().url());
+  if (calendarUrl.pathname === '/api/calendar/metadata') return route.fulfill({json:{year:Number(calendarUrl.searchParams.get('year')),published:false,source:'',holidays:{},solarTerms:{}}});
   const url = route.request().url();
   if (url.endsWith('/toggle')) { const todo = db.todos.find(t => url.endsWith(`/todos/${t.id}/toggle`)); todo.done=!todo.done; return route.fulfill({json:todo}); }
   return route.fulfill({status:200,json:url.endsWith('/comments') ? [{authorName:'系统管理员',createdAt:`${today}T11:00`,content:longText}] : {user:member,db}});

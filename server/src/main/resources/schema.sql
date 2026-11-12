@@ -1,3 +1,11 @@
+CREATE TABLE IF NOT EXISTS calendar_years (
+  calendar_year INT PRIMARY KEY,
+  source VARCHAR(1000) NOT NULL,
+  holidays_json LONGTEXT NOT NULL,
+  synced_at TIMESTAMP NOT NULL,
+  revision BIGINT NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(30) PRIMARY KEY,
   name VARCHAR(30) NOT NULL,

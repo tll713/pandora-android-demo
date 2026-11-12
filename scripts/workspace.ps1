@@ -9,6 +9,19 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $runDirectory = Join-Path $projectRoot 'tmp\run'
 $stateFile = Join-Path $runDirectory 'processes.json'
 
+# Read local configuration as data; environment variables take precedence.
+$localConfig = Join-Path $projectRoot '.env'
+if (Test-Path -LiteralPath $localConfig) {
+    foreach ($line in (Get-Content -LiteralPath $localConfig -Encoding UTF8)) {
+        if ($line -match '^\s*(SPRING_PROFILES_ACTIVE|PANDORA_DB_URL|PANDORA_DB_USERNAME|PANDORA_DB_PASSWORD|PANDORA_JWT_SECRET|PANDORA_DEMO_DATA_ENABLED|PANDORA_REQUIRE_HTTPS|PANDORA_BIND_ADDRESS|PANDORA_BOOTSTRAP_ENABLED|PANDORA_BOOTSTRAP_ADMIN_PHONE|PANDORA_BOOTSTRAP_ADMIN_PASSWORD)=(.*)$') {
+            if (-not [Environment]::GetEnvironmentVariable($Matches[1], 'Process')) {
+                [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2].Trim(), 'Process')
+            }
+        }
+    }
+}
+if (-not $env:SPRING_PROFILES_ACTIVE) { $env:SPRING_PROFILES_ACTIVE = 'demo' }
+
 function Test-TcpPort([string]$Computer, [int]$Port) {
     $client = New-Object Net.Sockets.TcpClient
     try {
@@ -130,6 +143,9 @@ try {
     $java = Find-Java
     $node = Find-Node
     $maven = Find-Maven
+    if ((-not $env:PANDORA_DB_PASSWORD -and -not $env:SPRING_DATASOURCE_PASSWORD) -or -not $env:PANDORA_JWT_SECRET -or [Text.Encoding]::UTF8.GetByteCount($env:PANDORA_JWT_SECRET) -lt 32) {
+        throw '请复制 .env.example 为 .env，填写数据库密码和至少 32 字节的随机 JWT 密钥。'
+    }
     Write-Host "Java: $java"
     Write-Host "Node: $node"
     Write-Host "Maven: $maven"
@@ -145,10 +161,8 @@ try {
 
     if ($servicesToStart -contains 'Backend') {
         $databaseUrl = $env:SPRING_DATASOURCE_URL
-        if (-not $databaseUrl) {
-            $configuration = Get-Content -LiteralPath (Join-Path $projectRoot 'server\src\main\resources\application.properties') -Raw
-            if ($configuration -match '(?m)^spring.datasource.url=(.+)$') { $databaseUrl = $Matches[1].Trim() }
-        }
+        if (-not $databaseUrl) { $databaseUrl = $env:PANDORA_DB_URL }
+        if (-not $databaseUrl) { $databaseUrl = 'jdbc:mysql://localhost:3306/pandora' }
         if ($databaseUrl -match '^jdbc:mysql://([^/:?]+)(?::(\d+))?/') {
             $databaseComputer = $Matches[1]
             $databasePort = if ($Matches[2]) { [int]$Matches[2] } else { 3306 }

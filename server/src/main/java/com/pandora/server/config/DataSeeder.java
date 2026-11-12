@@ -4,6 +4,7 @@ import com.pandora.server.model.*;
 import com.pandora.server.repository.*;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
+@ConditionalOnProperty(name = "pandora.demo-data.enabled", havingValue = "true")
 public class DataSeeder implements ApplicationRunner {
 
     private final UserRepository userRepository;

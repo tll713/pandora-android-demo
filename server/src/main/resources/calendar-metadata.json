@@ -1,0 +1,300 @@
+{
+  "2026": {
+    "source": "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm",
+    "holidays": {
+      "2026-01-01": {
+        "label": "元旦",
+        "type": "holiday"
+      },
+      "2026-01-02": {
+        "label": "元旦",
+        "type": "holiday"
+      },
+      "2026-01-03": {
+        "label": "元旦",
+        "type": "holiday"
+      },
+      "2026-01-04": {
+        "label": "元旦",
+        "type": "workday"
+      },
+      "2026-02-14": {
+        "label": "春节",
+        "type": "workday"
+      },
+      "2026-02-15": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-16": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-17": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-18": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-19": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-20": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-21": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-22": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-23": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2026-02-28": {
+        "label": "春节",
+        "type": "workday"
+      },
+      "2026-04-04": {
+        "label": "清明节",
+        "type": "holiday"
+      },
+      "2026-04-05": {
+        "label": "清明节",
+        "type": "holiday"
+      },
+      "2026-04-06": {
+        "label": "清明节",
+        "type": "holiday"
+      },
+      "2026-05-01": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2026-05-02": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2026-05-03": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2026-05-04": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2026-05-05": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2026-05-09": {
+        "label": "劳动节",
+        "type": "workday"
+      },
+      "2026-06-19": {
+        "label": "端午节",
+        "type": "holiday"
+      },
+      "2026-06-20": {
+        "label": "端午节",
+        "type": "holiday"
+      },
+      "2026-06-21": {
+        "label": "端午节",
+        "type": "holiday"
+      },
+      "2026-09-20": {
+        "label": "国庆节",
+        "type": "workday"
+      },
+      "2026-09-25": {
+        "label": "中秋节",
+        "type": "holiday"
+      },
+      "2026-09-26": {
+        "label": "中秋节",
+        "type": "holiday"
+      },
+      "2026-09-27": {
+        "label": "中秋节",
+        "type": "holiday"
+      },
+      "2026-10-01": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-02": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-03": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-04": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-05": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-06": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-07": {
+        "label": "国庆节",
+        "type": "holiday"
+      },
+      "2026-10-10": {
+        "label": "国庆节",
+        "type": "workday"
+      }
+    }
+  },
+  "2025": {
+    "source": "https://www.gov.cn/zhengce/zhengceku/202411/content_6986383.htm",
+    "holidays": {
+      "2025-01-01": {
+        "label": "元旦",
+        "type": "holiday"
+      },
+      "2025-01-26": {
+        "label": "春节",
+        "type": "workday"
+      },
+      "2025-01-28": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-01-29": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-01-30": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-01-31": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-02-01": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-02-02": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-02-03": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-02-04": {
+        "label": "春节",
+        "type": "holiday"
+      },
+      "2025-02-08": {
+        "label": "春节",
+        "type": "workday"
+      },
+      "2025-04-04": {
+        "label": "清明节",
+        "type": "holiday"
+      },
+      "2025-04-05": {
+        "label": "清明节",
+        "type": "holiday"
+      },
+      "2025-04-06": {
+        "label": "清明节",
+        "type": "holiday"
+      },
+      "2025-04-27": {
+        "label": "劳动节",
+        "type": "workday"
+      },
+      "2025-05-01": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2025-05-02": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2025-05-03": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2025-05-04": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2025-05-05": {
+        "label": "劳动节",
+        "type": "holiday"
+      },
+      "2025-05-31": {
+        "label": "端午节",
+        "type": "holiday"
+      },
+      "2025-06-01": {
+        "label": "端午节",
+        "type": "holiday"
+      },
+      "2025-06-02": {
+        "label": "端午节",
+        "type": "holiday"
+      },
+      "2025-09-28": {
+        "label": "国庆节、中秋节",
+        "type": "workday"
+      },
+      "2025-10-01": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-02": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-03": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-04": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-05": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-06": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-07": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-08": {
+        "label": "国庆节、中秋节",
+        "type": "holiday"
+      },
+      "2025-10-11": {
+        "label": "国庆节、中秋节",
+        "type": "workday"
+      }
+    }
+  }
+}

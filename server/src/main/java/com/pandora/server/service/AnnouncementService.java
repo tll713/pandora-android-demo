@@ -27,7 +27,7 @@ public class AnnouncementService {
     }
 
     @Transactional
-    public Announcement create(String title, String content, String category, LocalDate date) {
+    public Announcement create(String title, String content, String category, LocalDate date, boolean pinned) {
         if (title == null || title.trim().isEmpty()) throw new IllegalArgumentException("请填写标题");
         if (title.trim().length() > 120) throw new IllegalArgumentException("标题不能超过 120 个字");
         if (content == null || content.trim().isEmpty()) throw new IllegalArgumentException("请填写内容");
@@ -40,6 +40,7 @@ public class AnnouncementService {
         a.setContent(content.trim());
         a.setCategory(category.trim());
         a.setDate(date != null ? date : LocalDate.now());
+        a.setPinned(pinned);
         return announcementRepository.save(a);
     }
 

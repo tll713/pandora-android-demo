@@ -100,31 +100,21 @@ public class ApiController {
 
     @PostMapping("/auth/register")
     public ResponseEntity<?> register(@RequestBody Map<String, String> body) {
-        String phone = body.get("phone");
-        String password = body.get("password");
-        String name = body.get("name");
-        try {
-            AuthService.LoginResult result = authService.register(phone, password, name);
-            return ResponseEntity.ok(Map.of(
-                "token", result.token(),
-                "user", profileToMap(result.user())
-            ));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        }
+        return ResponseEntity.status(403).body(Map.of("error", "账号由公司管理员创建，请联系管理员"));
     }
 
-    /** 当前用户完善个人资料（实名认证） */
+    /** 个人资料补充不改变组织归属，也不代表身份已核验。 */
     @PutMapping("/auth/profile")
     public ResponseEntity<?> updateProfile(@AuthenticationPrincipal UserDetails ud,
                                            @RequestBody Map<String, String> body) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        if (!Set.of("name", "gender", "idNumber").containsAll(body.keySet()))
+            return ResponseEntity.status(403).body(Map.of("error", "部门、手机号、角色与账号状态由管理员维护"));
         try {
             String name = body.get("name");
             String gender = body.get("gender");
             String idNumber = body.get("idNumber");
-            String department = body.get("department");
             if (name == null || name.trim().isEmpty() || name.trim().length() > 30)
                 throw new IllegalArgumentException("姓名需为 1～30 个字");
             if (gender == null || !List.of("男", "女", "其他").contains(gender.trim()))
@@ -138,12 +128,9 @@ public class ApiController {
             } catch (Exception e) {
                 throw new IllegalArgumentException("身份证号中的出生日期无效");
             }
-            if (department == null || department.trim().isEmpty() || department.trim().length() > 40)
-                throw new IllegalArgumentException("部门需为 1～40 个字");
             user.setName(name.trim());
             user.setGender(gender.trim());
             user.setIdNumber(idv);
-            user.setDepartment(department.trim());
             user.setAvatar(name.trim().substring(name.trim().length() - 1));
             userRepository.save(user);
             return ResponseEntity.ok(profileToMap(user));
@@ -516,7 +503,7 @@ public class ApiController {
         if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "无权限"));
         try {
             LocalDate date = body.get("date") != null ? LocalDate.parse(body.get("date")) : null;
-            Announcement a = announcementService.create(body.get("title"), body.get("content"), body.get("category"), date);
+            Announcement a = announcementService.create(body.get("title"), body.get("content"), body.get("category"), date, "true".equals(body.get("pinned")));
             return ResponseEntity.ok(announcementToMap(a));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));

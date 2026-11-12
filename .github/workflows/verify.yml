@@ -1,0 +1,37 @@
+name: Verify
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Shanghai
+      PANDORA_E2E: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pandora-app/package-lock.json
+      - run: npm ci
+        working-directory: pandora-app
+      - run: npx playwright install --with-deps chromium
+        working-directory: pandora-app
+      - run: npm run check && npm test && npm run test:ui
+        working-directory: pandora-app
+      - run: mvn -B -ntp -f server/pom.xml verify
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: verification-failures
+          path: |
+            server/target/surefire-reports/
+            server/target/*.log
+            server/target/e2e/
+            web-admin/tests/artifacts/

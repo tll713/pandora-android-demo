@@ -1,14 +1,10 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import http from 'node:http';
 
-const require = createRequire(import.meta.url);
-const runtime = process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules');
-const { chromium } = require(path.join(runtime, 'playwright'));
+import { chromium, browserChannel } from '../../scripts/browser-test.mjs';
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const artifacts = path.join(webRoot, 'tests/artifacts');
 await mkdir(artifacts, { recursive: true });
@@ -23,7 +19,7 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const url = 'http://127.0.0.1:' + server.address().port;
-const browser = await chromium.launch({ channel: process.env.PANDORA_BROWSER_CHANNEL || 'msedge', headless: true });
+const browser = await chromium.launch({ channel: browserChannel, headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
 const page = await context.newPage(), errors = [], checks = [], requests = [], mutations = [];
 page.on('pageerror', error => errors.push(error.message));
@@ -55,7 +51,7 @@ await page.route('**/api/**', async route => {
   if (method === 'GET') {
     requests.push(p);
     if (failLoad && p === '/admin/users') return send({ error: '测试数据加载失败' }, 500);
-    const data = { '/admin/users': users, '/announcements': announcements, '/admin/highlights':highlights, '/admin/tasks':tasks }[p];
+    const data = { '/admin/users': users, '/announcements': announcements, '/admin/highlights':highlights, '/admin/tasks':tasks, '/admin/operations':[] }[p];
     return data ? send(data) : send({ error: '未知请求' }, 404);
   }
   mutations.push({ p, method, body });
@@ -77,7 +73,7 @@ await page.route('**/api/**', async route => {
   }
   if (p.endsWith('/password')) return send({ message: '密码已重置' });
   if (p === '/admin/announcements' && method === 'POST') {
-    announcements.push({ ...body, id: 'a' + (announcements.length + 1), date: '2026-10-24', pinned: false }); return send(announcements.at(-1));
+    announcements.push({ ...body, id: 'a' + (announcements.length + 1), date: '2026-10-24' }); return send(announcements.at(-1));
   }
   if (p.startsWith('/admin/announcements/')) {
     const index = announcements.findIndex(a => a.id === p.split('/').at(-1));
@@ -105,8 +101,8 @@ try {
   await page.locator('#login-error').getByText('仅管理员和创始人可登录管理后台').waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('pandora.admin.token')), null);
   await login('系统管理员'); await waitReload();
-  assert.deepEqual([...new Set(requests)].sort(), ['/admin/highlights','/admin/tasks','/admin/users', '/announcements']);
-  assert.equal(await page.locator('#navigation a').count(), 3);
+  assert.deepEqual([...new Set(requests)].sort(), ['/admin/highlights','/admin/operations','/admin/tasks','/admin/users', '/announcements']);
+  assert.equal(await page.locator('#navigation a').count(), 4);
   assert.equal(await page.locator('#page-title').textContent(), '组织与账号');
   await page.screenshot({ path: path.join(artifacts, 'organization.png'), fullPage: true });
   checks.push('默认进入组织与账号，支持十大内容管理');
@@ -179,8 +175,10 @@ try {
     if(kind==='personal') assert.equal(highlights.at(-1).audience,'lin');
     else assert.equal(highlights.at(-1).audience,'');
   }
-  await page.locator('#filter-form [name=kind]').selectOption('personal');
-  assert.equal(await page.locator('tbody tr').count(),1);
+  await page.locator('[data-action=pick-audience][data-id=lin]').click();
+  assert.equal(await page.locator('.slot-board').count(),3);
+  assert.equal(await page.locator('.slot-card').count(),30);
+  assert.equal(await page.locator('.slot-card:not(.is-empty)').count(),3);
   await page.locator('[data-action=edit-highlight][data-id=h3]').click();
   await page.locator('#highlight-form [name=position]').selectOption('3');
   await page.locator('#highlight-form [name=content]').fill('已修改的个人事务详情');
@@ -192,11 +190,10 @@ try {
   await page.locator('[data-action=toggle-highlight][data-id=h3]').click();await waitReload();
   await page.locator('[data-action=highlight-detail][data-id=h3]').click();
   await page.locator('#dialog-content').getByText('已修改的个人事务详情',{exact:true}).waitFor();await close();
-  await page.locator('[data-action=reset-filters]').click();
   await page.screenshot({path:path.join(artifacts,'highlights.png'),fullPage:true});
   await page.locator('[data-action=delete-highlight][data-id=h3]').click();
   await page.locator('#confirm-submit').click();await waitReload();assert.equal(highlights.length,2);
-  checks.push('三类十大内容录入、关联任务、个人对象、筛选、排序、详情、发布停用和删除');
+  checks.push('三类十大内容录入、关联任务、个人对象、位置调整、详情、发布停用和删除');
 
   failLoad = true; await page.getByRole('button', { name: '刷新', exact: true }).click();
   await page.getByText('数据加载失败', { exact: true }).waitFor();

@@ -7,15 +7,53 @@ import {
 } from './domain.js';
 
 const root = document.querySelector('#app'), modal = document.querySelector('#modal'), toast = document.querySelector('#toast');
-const DEFAULT_API = window.__PANDORA_API_BASE__ || 'http://localhost:8080/api';
-const API_KEY = 'pandora.apiBase';
-const API = localStorage.getItem(API_KEY) || DEFAULT_API;
+const API = window.__PANDORA_API_BASE__ || (location.port === '5173' ? `${location.protocol}//${location.hostname}:8080/api` : '/api');
 
 const state = { token: localStorage.getItem('pandora.token'), user: null, route: 'dashboard', filter: 'all',
   calendarMode: 'month', calendarDate: dateKey(), todoDate: dateKey(), logRange: '7', logQuery: '', logComments: {},
   logDepartment: '', logRole: '', logAuthor: '', logFrom: '', logTo: '', logSubmission: 'all', logCheckDate: dateKey(), messageFilter: 'all',
-  taskQuery: '', taskPriority: '', taskScope: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null, authView: 'login' };
+  taskQuery: '', taskPriority: '', taskScope: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null,
+  calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
 const APP_VERSION = '0.5.8';
+let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '';
+
+function validCalendarMetadata(data, year) {
+  return data?.year === Number(year) && typeof data.published === 'boolean'
+    && data.holidays && !Array.isArray(data.holidays) && data.solarTerms && !Array.isArray(data.solarTerms)
+    && Object.entries(data.holidays).every(([day,h]) => day.startsWith(`${year}-`) && h
+      && typeof h.label === 'string' && ['holiday','workday'].includes(h.type))
+    && Object.values(data.solarTerms).every(term => typeof term === 'string');
+}
+function readCalendarCache() {
+  try {
+    const entries = JSON.parse(localStorage.getItem('pandora.calendar') || '{}');
+    return Object.fromEntries(Object.entries(entries).filter(([year,entry]) => validCalendarMetadata(entry?.data,year) && Number.isFinite(entry.updatedAt)));
+  } catch { return {}; }
+}
+function refreshView() {
+  if (modal.open || (root.contains(document.activeElement) && document.activeElement.closest('form'))) {
+    deferredRender = true; return;
+  }
+  render(true);
+}
+
+// Use local midnight (including timezone/DST changes); resume/focus checks cover suspended WebViews.
+function checkSystemDate() {
+  const today = dateKey();
+  if (today !== observedToday) {
+    if (state.calendarDate === observedToday) state.calendarDate = today;
+    if (state.todoDate === observedToday) {
+      if (modal.open) deferredTodoDate ||= observedToday;
+      else state.todoDate = today;
+    }
+    if (state.logCheckDate === observedToday) state.logCheckDate = today;
+    observedToday = today;
+    if (state.user) refreshView();
+  }
+  clearTimeout(midnightTimer);
+  const next = new Date(); next.setHours(24,0,0,0);
+  midnightTimer = setTimeout(checkSystemDate, Math.max(1,next.getTime() - Date.now()));
+}
 
 // ============ API 客户端 ============
 async function api(path, options = {}) {
@@ -55,6 +93,30 @@ async function loadWorkspace() {
   USERS.push(...(state.db.members || []));
 }
 
+// Statutory holidays and make-up workdays are announced year by year in China,
+// so they are served by the backend instead of being compiled into the app.
+async function loadCalendarMetadata(year, force = false) {
+  const cache = state.calendarMetadata, token = state.token;
+  const updatedAt = Math.max(cache.years[year]?.updatedAt || 0, cache.errors[year]?.at || 0);
+  const age = Date.now() - updatedAt;
+  if (cache.loading[year] || (!force && age >= 0 && age < 30000)) return;
+  cache.loading[year] = true;
+  delete cache.errors[year];
+  try {
+    const data = await api(`/calendar/metadata?year=${encodeURIComponent(year)}`);
+    if (!validCalendarMetadata(data,year))
+      throw new Error('日历安排数据格式无效');
+    if (state.token !== token) return;
+    cache.years[year] = { data, updatedAt: Date.now() };
+    try { localStorage.setItem('pandora.calendar', JSON.stringify(cache.years)); } catch { /* Storage may be full or disabled. */ }
+  } catch {
+    if (state.token === token) cache.errors[year] = { at: Date.now() };
+  } finally {
+    delete cache.loading[year];
+    if (state.token === token && state.route === 'calendar' && state.taskView === 'calendar') refreshView();
+  }
+}
+
 async function loadLogHistory() {
   if (state.logHistoryLoaded || state.logLoading) return;
   const token = state.token;
@@ -85,6 +147,7 @@ function logout() {
   state.logHistoryLoaded = false; state.logLoading = false; state.logError = ''; state.logRange = '7'; state.logQuery = '';
   state.taskQuery = ''; state.taskPriority = ''; state.taskScope = ''; state.filter = 'all';
   resetLogFilters(); state.messageFilter = 'all'; state.logComments = {};
+  state.calendarMetadata = { years: {}, loading: {}, errors: {} };
   close(); render();
 }
 
@@ -134,6 +197,10 @@ function open(title, body) {
 function close() {
   const fromMessages = Boolean(modal.dataset.messages);
   modal.close(); modal.innerHTML = ''; modal.dataset.messages = '';
+  if (deferredTodoDate && state.todoDate === deferredTodoDate) state.todoDate = dateKey();
+  deferredTodoDate = '';
+  checkSystemDate();
+  if (deferredRender) render(true);
   if (fromMessages) root.querySelector('[data-action="messages-open"]')?.focus();
 }
 function avatar(u, className = 'avatar') { return u.avatarData ? `<span class="${className}"><img src="${esc(u.avatarData)}" alt=""></span>` : `<span class="${className}">${esc(u.avatar || u.name?.slice(-1) || '?')}</span>`; }
@@ -154,13 +221,12 @@ function reportContent(content) {
 function logCard(l) { const author = userById(l.author); return `<article class="log-card"><div class="log-card-top"><b>${esc(author?.name)}</b><span>${l.date}${l.date === dateKey() ? ' · 今天' : ''}</span></div><small class="log-author-info">${esc(author?.department || '')} · ${esc(author?.roleName || author?.role || '')}</small><h3>${button(esc(l.title), 'log', l.id, 'log-title-button')}</h3>${l.tagId ? tagBadge(l) : ''}${reportContent(l.content)}${l.versions?.length ? `<small>保留 ${l.versions.length} 次修改记录</small>` : ''}</article>`; }
 
 function loginPage() {
-  const isRegister = state.authView === 'register';
-  return `<div class="login-page"><div class="login-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><h1>${isRegister ? '创建账号' : '欢迎回来'}</h1><p class="login-sub">${isRegister ? '使用手机号注册工作账号' : '登录你的工作账号'}</p><form data-form="${isRegister ? 'register' : 'login'}">${isRegister ? `<label>手机号<input name="phone" type="tel" required pattern="[0-9]{11}" autocomplete="tel" placeholder="请输入 11 位手机号"></label><label>姓名（选填）<input name="name" maxlength="30" autocomplete="name" placeholder="请输入真实姓名"></label><label>设置密码<input type="password" name="password" required minlength="6" maxlength="64" autocomplete="new-password" placeholder="6～64 位密码"></label><label>确认密码<input type="password" name="confirmPassword" required minlength="6" maxlength="64" autocomplete="new-password" placeholder="再次输入密码"></label>` : `<label>手机号或姓名<input name="identifier" required autocomplete="username" placeholder="请输入手机号或姓名"></label><label>密码<input type="password" name="password" required autocomplete="current-password" placeholder="请输入密码"></label>`}<button class="primary-button login-button" type="submit">${isRegister ? '注册' : '登录'}</button></form><button class="text-button auth-switch" data-auth-view="${isRegister ? 'login' : 'register'}">${isRegister ? '已有账号？去登录' : '没有账号？注册'}</button></div></div>`;
+  return `<div class="login-page"><div class="login-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><h1>欢迎回来</h1><p class="login-sub">登录你的工作账号</p><form data-form="login"><label>手机号或姓名<input name="identifier" required autocomplete="username" placeholder="请输入手机号或姓名"></label><label>密码<input type="password" name="password" required autocomplete="current-password" placeholder="请输入密码"></label><button class="primary-button login-button" type="submit">登录</button></form><p class="help-note">账号由公司管理员创建，无法登录时请联系管理员。</p></div></div>`;
 }
 
 function profileCompletePage() {
   const u = user();
-  return `<div class="login-page"><div class="login-card profile-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><div class="profile-warning"><span class="warning-icon">⚠</span><div><h2>请完善个人信息</h2><p>完成实名认证后即可使用全部功能</p></div></div><form class="modal-form" data-form="profile"><label>姓名<input name="name" value="${esc(u.name || '')}" maxlength="30" required></label><label>手机号<input name="phone" value="${esc(u.phone || '')}" readonly></label><label>性别<select name="gender" required><option value="">请选择</option><option value="男" ${u.gender === '男' ? 'selected' : ''}>男</option><option value="女" ${u.gender === '女' ? 'selected' : ''}>女</option><option value="其他" ${u.gender === '其他' ? 'selected' : ''}>其他</option></select></label><label>身份证号<input name="idNumber" value="${esc(u.idNumber || '')}" maxlength="18" required placeholder="请输入 18 位身份证号"></label><label>部门<input name="department" value="${u.department && u.department !== '待分配' ? esc(u.department) : ''}" maxlength="40" required placeholder="请输入所在部门"></label><button class="primary-button login-button" type="submit">提交并进入</button></form><button class="text-button" data-action="logout">退出登录</button></div></div>`;
+  return `<div class="login-page"><div class="login-card profile-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><div class="profile-warning"><span class="warning-icon">⚠</span><div><h2>请完善个人信息</h2><p>请补充个人资料；部门和手机号由管理员维护</p></div></div><form class="modal-form" data-form="profile"><label>姓名<input name="name" value="${esc(u.name || '')}" maxlength="30" required></label><label>手机号<input name="phone" value="${esc(u.phone || '')}" readonly></label><label>性别<select name="gender" required><option value="">请选择</option><option value="男" ${u.gender === '男' ? 'selected' : ''}>男</option><option value="女" ${u.gender === '女' ? 'selected' : ''}>女</option><option value="其他" ${u.gender === '其他' ? 'selected' : ''}>其他</option></select></label><label>身份证号<input name="idNumber" value="${esc(u.idNumber || '')}" maxlength="18" required placeholder="请输入 18 位身份证号"></label><label>部门<input value="${esc(u.department || '待管理员分配')}" readonly></label><button class="primary-button login-button" type="submit">提交并进入</button></form><button class="text-button" data-action="logout">退出登录</button></div></div>`;
 }
 
 function dashboard() {
@@ -178,7 +244,7 @@ function dashboard() {
   const unread = unreadMessages();
   const messageButton = `<button class="dashboard-messages" data-action="messages-open" aria-label="消息${unread ? `，${unread} 条未读` : ''}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>消息</span>${unread ? `<em class="message-badge" aria-hidden="true">${unread > 99 ? '99+' : unread}</em>` : ''}</button>`;
   return `<section class="dashboard-page"><header class="dashboard-head"><div><span class="eyebrow">${dateKey()}</span><h1>你好，${esc(user().name)}</h1></div>${messageButton}</header><div class="dashboard-grid">` +
-    tile('事件纪', 'company-highlights', highlightRows(company) || '<p class="tile-empty">暂无重要事项，请在 Web 管理端维护</p>', String(company.length).padStart(2, '0')) +
+    tile('事件纪', 'company-highlights', (highlightRows(company) || '<p class="tile-empty">暂无重要事项</p>') + button('公司公告', 'announcements-open', '', 'text-button'), String(company.length).padStart(2, '0')) +
     tile('任务看板', 'all-tasks', taskRows(myTasks, '暂无派发给你的任务'), String(myTasks.length).padStart(2, '0')) +
     tile('每日事项', 'todo-calendar', todoCalendarHtml(true), `${String(doneToday).padStart(2, '0')}/${String(todos.length).padStart(2, '0')}`) +
     `</div></section>`;
@@ -352,128 +418,17 @@ function lunarDate(day) {
   const label = n <= 10 ? `初${digits[n-1]}` : n < 20 ? `十${digits[n-11]}` : n === 20 ? '二十' : n < 30 ? `廿${digits[n-21]}` : '三十';
   return {short:n === 1 ? part('month') : label, full:`${part('yearName')}年${part('month')}${label}`};
 }
-// 节假日和休班安排（2025-2027年完整版）
-// type: holiday=法定节假日休息, workday=调休上班日
-const holidayData = {
-  // 2025年
-  '2025-01-01': { label: '元旦', type: 'holiday' },
-  '2025-01-28': { label: '春节', type: 'holiday' },
-  '2025-01-29': { label: '春节', type: 'holiday' },
-  '2025-01-30': { label: '春节', type: 'holiday' },
-  '2025-01-31': { label: '春节', type: 'holiday' },
-  '2025-02-01': { label: '春节', type: 'holiday' },
-  '2025-02-02': { label: '春节', type: 'holiday' },
-  '2025-02-03': { label: '春节', type: 'holiday' },
-  '2025-02-04': { label: '春节', type: 'holiday' },
-  '2025-04-04': { label: '清明节', type: 'holiday' },
-  '2025-04-05': { label: '清明节', type: 'holiday' },
-  '2025-04-06': { label: '清明节', type: 'holiday' },
-  '2025-05-01': { label: '劳动节', type: 'holiday' },
-  '2025-05-02': { label: '劳动节', type: 'holiday' },
-  '2025-05-03': { label: '劳动节', type: 'holiday' },
-  '2025-05-04': { label: '劳动节', type: 'holiday' },
-  '2025-05-05': { label: '劳动节', type: 'holiday' },
-  '2025-05-31': { label: '端午节', type: 'holiday' },
-  '2025-06-01': { label: '端午节', type: 'holiday' },
-  '2025-06-02': { label: '端午节', type: 'holiday' },
-  '2025-10-01': { label: '国庆节', type: 'holiday' },
-  '2025-10-02': { label: '国庆节', type: 'holiday' },
-  '2025-10-03': { label: '国庆节', type: 'holiday' },
-  '2025-10-04': { label: '国庆节', type: 'holiday' },
-  '2025-10-05': { label: '国庆节', type: 'holiday' },
-  '2025-10-06': { label: '国庆节', type: 'holiday' },
-  '2025-10-07': { label: '国庆节', type: 'holiday' },
-  '2025-10-08': { label: '国庆节', type: 'holiday' },
-  // 2026年
-  '2026-01-01': { label: '元旦', type: 'holiday' },
-  '2026-02-16': { label: '春节', type: 'holiday' },
-  '2026-02-17': { label: '春节', type: 'holiday' },
-  '2026-02-18': { label: '春节', type: 'holiday' },
-  '2026-02-19': { label: '春节', type: 'holiday' },
-  '2026-02-20': { label: '春节', type: 'holiday' },
-  '2026-02-21': { label: '春节', type: 'holiday' },
-  '2026-02-22': { label: '春节', type: 'holiday' },
-  '2026-02-23': { label: '春节', type: 'holiday' },
-  '2026-04-04': { label: '清明节', type: 'holiday' },
-  '2026-04-05': { label: '清明节', type: 'holiday' },
-  '2026-04-06': { label: '清明节', type: 'holiday' },
-  '2026-05-01': { label: '劳动节', type: 'holiday' },
-  '2026-05-02': { label: '劳动节', type: 'holiday' },
-  '2026-05-03': { label: '劳动节', type: 'holiday' },
-  '2026-05-04': { label: '劳动节', type: 'holiday' },
-  '2026-05-05': { label: '劳动节', type: 'holiday' },
-  '2026-06-19': { label: '端午节', type: 'holiday' },
-  '2026-06-20': { label: '端午节', type: 'holiday' },
-  '2026-06-21': { label: '端午节', type: 'holiday' },
-  '2026-09-25': { label: '中秋节', type: 'holiday' },
-  '2026-09-26': { label: '中秋节', type: 'holiday' },
-  '2026-09-27': { label: '中秋节', type: 'holiday' },
-  '2026-10-01': { label: '国庆节', type: 'holiday' },
-  '2026-10-02': { label: '国庆节', type: 'holiday' },
-  '2026-10-03': { label: '国庆节', type: 'holiday' },
-  '2026-10-04': { label: '国庆节', type: 'holiday' },
-  '2026-10-05': { label: '国庆节', type: 'holiday' },
-  '2026-10-06': { label: '国庆节', type: 'holiday' },
-  '2026-10-07': { label: '国庆节', type: 'holiday' },
-  // 调休上班日
-  '2026-02-14': { label: '春节调休', type: 'workday' },
-  '2026-02-28': { label: '春节调休', type: 'workday' },
-  '2026-04-11': { label: '清明调休', type: 'workday' },
-  '2026-09-20': { label: '中秋调休', type: 'workday' },
-  '2026-10-10': { label: '国庆调休', type: 'workday' },
-  // 2027年
-  '2027-01-01': { label: '元旦', type: 'holiday' },
-  '2027-01-02': { label: '元旦', type: 'holiday' },
-  '2027-02-06': { label: '春节', type: 'holiday' },
-  '2027-02-07': { label: '春节', type: 'holiday' },
-  '2027-02-08': { label: '春节', type: 'holiday' },
-  '2027-02-09': { label: '春节', type: 'holiday' },
-  '2027-02-10': { label: '春节', type: 'holiday' },
-  '2027-02-11': { label: '春节', type: 'holiday' },
-  '2027-02-12': { label: '春节', type: 'holiday' },
-  '2027-02-13': { label: '春节', type: 'holiday' },
-  '2027-04-03': { label: '清明节', type: 'holiday' },
-  '2027-04-04': { label: '清明节', type: 'holiday' },
-  '2027-04-05': { label: '清明节', type: 'holiday' },
-  '2027-05-01': { label: '劳动节', type: 'holiday' },
-  '2027-05-02': { label: '劳动节', type: 'holiday' },
-  '2027-05-03': { label: '劳动节', type: 'holiday' },
-  '2027-05-04': { label: '劳动节', type: 'holiday' },
-  '2027-05-05': { label: '劳动节', type: 'holiday' },
-  '2027-06-09': { label: '端午节', type: 'holiday' },
-  '2027-06-10': { label: '端午节', type: 'holiday' },
-  '2027-06-11': { label: '端午节', type: 'holiday' },
-  '2027-10-01': { label: '国庆节', type: 'holiday' },
-  '2027-10-02': { label: '国庆节', type: 'holiday' },
-  '2027-10-03': { label: '国庆节', type: 'holiday' },
-  '2027-10-04': { label: '国庆节', type: 'holiday' },
-  '2027-10-05': { label: '国庆节', type: 'holiday' },
-  '2027-10-06': { label: '国庆节', type: 'holiday' },
-  '2027-10-07': { label: '国庆节', type: 'holiday' },
-  '2027-10-08': { label: '国庆节', type: 'holiday' },
-};
-const solarTerms = {
-  '2026-01-05': '小寒', '2026-01-20': '大寒',
-  '2026-02-04': '立春', '2026-02-19': '雨水',
-  '2026-03-06': '惊蛰', '2026-03-21': '春分',
-  '2026-04-05': '清明', '2026-04-20': '谷雨',
-  '2026-05-05': '立夏', '2026-05-21': '小满',
-  '2026-06-06': '芒种', '2026-06-21': '夏至',
-  '2026-07-07': '小暑', '2026-07-23': '大暑',
-  '2026-08-07': '立秋', '2026-08-23': '处暑',
-  '2026-09-08': '白露', '2026-09-23': '秋分',
-  '2026-10-08': '寒露', '2026-10-24': '霜降',
-  '2026-11-07': '立冬', '2026-11-22': '小雪',
-  '2026-12-07': '大雪', '2026-12-22': '冬至',
-};
+// Holiday and solar-term metadata is loaded from the backend per calendar year.
+
 function dayMarkers(day) {
   const markers = [];
-  const holiday = holidayData[day];
+  const metadata = state.calendarMetadata.years[day.slice(0,4)]?.data;
+  const holiday = metadata?.holidays[day];
   if (holiday) {
     markers.push({ type: holiday.type === 'holiday' ? 'rest' : 'work', label: holiday.type === 'holiday' ? '休' : '班' });
     markers.push({ type: 'event', label: holiday.label });
   }
-  const term = solarTerms[day];
+  const term = metadata?.solarTerms[day];
   if (term && !holiday) {
     markers.push({ type: 'event', label: term });
   }
@@ -552,7 +507,7 @@ function calendarDateCell(day, showMonthLabel = false, todoDays) {
     <button class="day-date" data-day="${day}" aria-pressed="${day===state.calendarDate}" ${day===dateKey()?'aria-current="date"':''} aria-label="查看 ${day} 日安排">
       <span class="day-number">${Number(day.slice(-2))}</span>
       <small class="day-sub ${restWork ? `day-sub--${restWork.type}` : ''}">
-        ${restWork ? `<em>${restWork.label}</em>` : ''}${subLabel ? subLabel.label : ''}${hasTodos ? '<i class="day-todo-dot" title="有每日事项" aria-hidden="true"></i>' : ''}
+        ${restWork ? `<em>${restWork.label}</em>` : ''}${subLabel ? esc(subLabel.label) : ''}${hasTodos ? '<i class="day-todo-dot" title="有每日事项" aria-hidden="true"></i>' : ''}
       </small>
     </button>
   </article>`;
@@ -576,12 +531,21 @@ function calendarPage() {
     return `<div class="company-panel"><section class="task-page-head"><div class="task-page-title"><span class="eyebrow">${dateKey()} · ${WEEKDAY[today.getDay()]}</span><h1>公司任务</h1></div>${button('＋ 新建任务','new-task','','primary-button task-create-button')}</section><div class="task-view-row">${viewSwitch('list')}</div>` + taskListView() + `</div>`;
   }
   const isMonth = state.calendarMode === 'month';
+  const year = state.calendarDate.slice(0,4), metadata = state.calendarMetadata.years[year]?.data;
+  const metadataNote = state.calendarMetadata.errors[year] ? `日历信息暂时无法更新${metadata ? '，使用已缓存数据' : ''} ${button('重试','calendar-metadata-retry','','text-button')}`
+    : !metadata ? '正在加载日历信息…' : !metadata.published ? `${year} 年暂未获取到已公布的放假、调休安排，将自动检查更新`
+    : metadata.syncStatus === 'unavailable' ? '节假日安排同步暂不可用，使用已缓存数据，将自动重试' : '';
   const zoomClass = isMonth ? 'zoom-2' : '';
   const top = `<header class="ios-calendar-toolbar"><div class="calendar-title-group"><h1 class="ios-month-title"><button data-action="calendar-back" aria-label="${isMonth?'选择年月':'返回月视图'}">${month}</button></h1><span class="calendar-year">${date.getFullYear()}年</span></div><div class="calendar-head-actions"><button class="calendar-today-button" data-action="today">今天</button><button class="calendar-create-button" data-action="new-task" aria-label="新建任务">${calendarIcon('plus')}</button></div></header><div class="calendar-view-row">${viewSwitch('calendar')}</div>`;
   const dates = calendarDates(isMonth ? 'month' : 'week');
   const dateStrip = `<section class="calendar-panel calendar-panel--${isMonth?'month':'week'}" aria-label="${date.getFullYear()}年${date.getMonth()+1}月"><div class="calendar-week">${['日','一','二','三','四','五','六'].map(v=>`<span>${v}</span>`).join('')}</div><div class="calendar-grid" style="--calendar-rows:${dates.length/7}">${isMonth ? calendarMonthRows(tasks,logs,dates,todoDays) : dates.map(day=>calendarDateCell(day,false,todoDays)).join('')}</div></section>`;
   const modes = `<div class="calendar-mode-tabs" role="group" aria-label="日历周期">${[['month','月'],['week','周'],['day','日']].map(([mode,label]) => `<button data-mode="${mode}" aria-pressed="${state.calendarMode === mode}">${label}</button>`).join('')}</div>`;
-  return `<section class="ios-calendar ios-calendar--${state.calendarMode} ${zoomClass}">${top}${modes}${isMonth?`<div class="calendar-month-content" id="calendar-scroll-area">${dateStrip}${calendarSelectedAgenda(tasks,todos)}</div>`:dateStrip+`<div class="calendar-agenda-scroll">${calendarAgenda(tasks,logs,todos)}</div>`}</section>`;
+  return `<section class="ios-calendar ios-calendar--${state.calendarMode} ${zoomClass}">${top}${modes}${metadataNote ? `<p class="calendar-metadata-note" role="status">${metadataNote}</p>` : ''}${isMonth?`<div class="calendar-month-content" id="calendar-scroll-area">${dateStrip}${calendarSelectedAgenda(tasks,todos)}</div>`:dateStrip+`<div class="calendar-agenda-scroll">${calendarAgenda(tasks,logs,todos)}</div>`}</section>`;
+}
+
+function announcementsDetail() {
+  const items = [...(state.db.announcements || [])].sort((a,b) => Number(b.pinned)-Number(a.pinned) || b.date.localeCompare(a.date));
+  open('公司公告', `<div class="highlight-dialog-list">${items.map(a => `<article class="announcement"><span class="announcement-tag">${a.pinned ? '置顶 · ' : ''}${esc(a.category)} · ${esc(a.date)}</span><h3>${esc(a.title)}</h3><p class="log-content">${esc(a.content)}</p></article>`).join('') || '<p class="detail-copy">暂无公司公告</p>'}</div>`);
 }
 
 function highlightsDetail(kind = 'company', id = '') {
@@ -632,7 +596,11 @@ function helpDialog() {
 }
 
 // ============ 路由渲染 ============
-function render() {
+function render(preservePosition = false) {
+  deferredRender = false;
+  const selectors = ['.calendar-month-content','.calendar-agenda-scroll','.tile-scroll','.main-content'];
+  const positions = preservePosition ? selectors.flatMap(selector => [...root.querySelectorAll(selector)].map((el,index) => ({selector,index,top:el.scrollTop,left:el.scrollLeft}))) : [];
+  const windowPosition = [window.scrollX,window.scrollY];
   // 「公司」下分日历与任务列表两个视图，两屏共用同一套外壳，切换时不跳版。
   const calendarActive = Boolean(state.token && state.user && state.route === 'calendar');
   document.body.classList.toggle('calendar-active', calendarActive);
@@ -648,14 +616,23 @@ function render() {
     root.innerHTML = profileCompletePage();
     return;
   }
-  const nav = [['dashboard','首页','⌂'],['logs','日志','✎'],['calendar','公司','▦'],['mine','我的','◯']];
+  if (state.route === 'calendar' && state.taskView === 'calendar') {
+    const years = new Set([state.calendarDate.slice(0,4), ...(state.calendarMode === 'month' ? [] : calendarDates('week').map(day=>day.slice(0,4)))]);
+    for (const year of years) void loadCalendarMetadata(year);
+  }
+  const nav = [['dashboard','首页','⌂'],['logs','日志','✎'],['calendar','任务','▦'],['mine','我的','◯']];
   const pages = { dashboard, logs: logsPage, calendar: calendarPage, mine: minePage };
   root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><nav class="nav" aria-label="主导航">${nav.map(([route,label,icon]) => `<button class="nav-item ${state.route === route ? 'is-active' : ''}" data-route="${route}"><span class="nav-glyph">${icon}</span><span>${label}</span></button>`).join('')}</nav></aside><main class="main-content"><header class="topbar"><div class="mobile-brand"><span class="brand-mark">P</span><b>潘多拉</b></div><span class="version-label">工作台</span><button class="user-menu" data-route="mine" aria-label="进入我的页面">${person(user())}<span>›</span></button></header><div class="page-wrap ${state.route === 'dashboard' ? 'page-wrap--dashboard' : ''}">${pages[state.route]()}</div></main></div>`;
   const monthContent = root.querySelector('.calendar-month-content');
   const selectedWeek = monthContent?.querySelector('.calendar-day.is-selected')?.closest('.calendar-week-row');
-  if (selectedWeek && monthContent.scrollHeight > monthContent.clientHeight) {
+  if (!preservePosition && selectedWeek && monthContent.scrollHeight > monthContent.clientHeight) {
     monthContent.scrollTop = Math.max(0, selectedWeek.getBoundingClientRect().top - monthContent.getBoundingClientRect().top - 36);
   }
+  for (const position of positions) {
+    const el = root.querySelectorAll(position.selector)[position.index];
+    if (el) { el.scrollTop = position.top; el.scrollLeft = position.left; }
+  }
+  if (preservePosition) window.scrollTo(...windowPosition);
 }
 
 // ============ 详情弹窗 ============
@@ -772,6 +749,7 @@ function requestDetail(id) {
 
 // ============ 操作分发 ============
 async function action(name,id) {
+  if (name === 'calendar-metadata-retry') return loadCalendarMetadata(state.calendarDate.slice(0,4), true);
   if (name === 'messages-open') {
     state.messageFilter = 'all'; openMessages();
     try { await loadWorkspace(); render(); if (modal.dataset.messages === 'list') openMessages(); }
@@ -817,6 +795,7 @@ async function action(name,id) {
   if (name === 'log') return logDetail(id);
   if (name === 'request') { const r = visibleRequests(state.db,user()).find(r => r.id === id); if (r) markMessagesRead([r]); render(); return requestDetail(id); }
   if (name === 'company-highlights') return highlightsDetail();
+  if (name === 'announcements-open') return announcementsDetail();
   if (name === 'dispatch-highlights') return highlightsDetail('dispatch');
   if (name === 'personal-highlights') return highlightsDetail('personal');
   if (name === 'highlight') {
@@ -917,7 +896,6 @@ document.addEventListener('click', async e => {
     state.route = el.dataset.route;
     render(); window.scrollTo(0,0); return;
   }
-  if (el.dataset.authView) { state.authView = el.dataset.authView; render(); return; }
   if (el.dataset.filter) { state.filter=el.dataset.filter; render(); return; }
   if (el.dataset.mode) { state.calendarMode=el.dataset.mode; close(); render(); return; }
   if (el.dataset.calendarMonth) {state.calendarDate=el.dataset.calendarMonth;state.calendarMode='month';close();render();return;}
@@ -1020,23 +998,11 @@ document.addEventListener('submit', async e => {
     } catch (err) { notify(err.message, true); }
     return;
   }
-  if (form.dataset.form === 'register') {
-    const error = form.querySelector('.form-error') || form.appendChild(document.createElement('div'));
-    error.className = 'form-error'; error.textContent = '';
-    if (v.password !== v.confirmPassword) { error.textContent = '两次输入的密码不一致'; return; }
-    try {
-      const r = await api('/auth/register', { method: 'POST', body: JSON.stringify({ phone: v.phone, password: v.password, name: v.name }) });
-      state.token = r.token; localStorage.setItem('pandora.token', r.token);
-      await loadWorkspace(); close(); render();
-      notify('注册成功，请完善个人信息');
-    } catch (err) { notify(err.message, true); }
-    return;
-  }
   if (form.dataset.form === 'profile') {
     const error = form.querySelector('.form-error') || form.appendChild(document.createElement('div'));
     error.className = 'form-error'; error.textContent = '';
     try {
-      const updated = await api('/auth/profile', { method: 'PUT', body: JSON.stringify({ name: v.name, gender: v.gender, idNumber: v.idNumber, department: v.department }) });
+      const updated = await api('/auth/profile', { method: 'PUT', body: JSON.stringify({ name: v.name, gender: v.gender, idNumber: v.idNumber }) });
       state.user = { ...state.user, ...updated };
       await loadWorkspace(); close(); render();
       notify('个人信息已完善，欢迎使用');
@@ -1104,13 +1070,18 @@ modal.addEventListener('cancel', e => {
 window.pandoraBack = () => { if (modal.open) { if (['request','detail'].includes(modal.dataset.messages)) openMessages(); else close(); return true; } if (state.route !== 'dashboard') { state.route='dashboard'; render(); return true; } return false; };
 let refreshingWorkspace = false;
 async function refreshWorkspace() {
+  checkSystemDate();
   if (refreshingWorkspace || document.hidden || !state.token || !state.db) return;
+  if (state.route === 'calendar' && state.taskView === 'calendar') {
+    const years = new Set([state.calendarDate.slice(0,4), ...(state.calendarMode === 'month' ? [] : calendarDates('week').map(day=>day.slice(0,4)))]);
+    for (const year of years) void loadCalendarMetadata(year);
+  }
   refreshingWorkspace = true;
   const tagsBefore = JSON.stringify(state.db.tags);
   try {
     await loadWorkspace();
     // Keep form drafts and the reader's place while receiving updates.
-    if (!modal.open && !root.querySelector('form')?.contains(document.activeElement)) render();
+    refreshView();
     if (modal.dataset.messages === 'list') { render(); openMessages(); }
     const field = modal.querySelector('[data-form="task"] .tag-choices');
     if (field && tagsBefore !== JSON.stringify(state.db.tags) && !field.querySelector('.tag-editor:not([hidden])')) {
@@ -1123,6 +1094,17 @@ async function refreshWorkspace() {
 setInterval(refreshWorkspace,30000);
 document.addEventListener('visibilitychange',refreshWorkspace);
 window.addEventListener('focus',refreshWorkspace);
+window.addEventListener('pageshow',refreshWorkspace);
+window.addEventListener('online',refreshWorkspace);
+root.addEventListener('focusout', () => { if (deferredRender) queueMicrotask(refreshView); });
+modal.addEventListener('close', () => {
+  if (modal.open) return;
+  if (deferredTodoDate && state.todoDate === deferredTodoDate) state.todoDate = dateKey();
+  deferredTodoDate = '';
+  checkSystemDate();
+  if (deferredRender) refreshView();
+});
+checkSystemDate();
 modal.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.closest('.tag-editor') && e.target.tagName === 'INPUT') {
     e.preventDefault(); const submit = modal.querySelector('[data-action="tag-save"]');

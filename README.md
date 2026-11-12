@@ -1,6 +1,6 @@
 # 潘多拉智能掌上工作系统
 
-面向中小企业的任务协作与工作日志系统。按甲方诉求实现「全员 App 端 + 管理员 Web 端 + 统一后端」的全栈架构：员工在 App 上处理任务、记录进展、写每日日志；管理员在 Web 端维护组织账号和公司公告，任务申请及审核在 App 视图页处理。
+面向中小企业的任务协作与工作日志系统。按甲方诉求实现「全员 App 端 + 管理员 Web 端 + 统一后端」的全栈架构：员工在 App 上处理任务、记录进展、写每日日志；管理员在 Web 端维护组织账号和公司公告，任务申请在 App 任务页提交，审核在首页消息中处理。
 
 首页消息包含申请审核、事件纪与任务看板更新。管理员和创始人可以在“审核结果”查看可见申请的处理结果；普通成员查看本人申请结果。首页内容发布、修改、撤下，以及任务创建生效、修改、进展、完成、删除会生成持久通知，只向相应查看范围内的成员发送。工作区在页面恢复可见时刷新，并每 30 秒同步一次；消息列表展示最近 200 条内容更新通知。
 
@@ -16,7 +16,7 @@
 │ (安卓 WebView │   │  (原生 JS，   │
 │  /浏览器预览)  │   │  由后端托管)  │
 └──────┬───────┘   └──────┬───────┘
-       │   HTTP + JWT     │
+       │   HTTPS + JWT     │
        └────────┬─────────┘
         ┌───────▼────────┐
         │  Spring Boot    │
@@ -42,11 +42,11 @@
 - 使用手机号或姓名登录，管理员建号自动生成 18 位随机强密码，创建后仅展示一次。
 - 个人资料可查看性别、身份证号、手机号；“我的”页可更换头像。
 - 每日事项按天记录，仅本人可见，可在首页勾选完成。
-- Web 管理端提供组织与账号、系统日志与十大内容维护；App 保留任务标签，采用浅色背景与深色文字，没有选标签的任务按「长期任务」显示。系统日志汇总登录、写日志、评价日志、任务进展与审核、每日事项、账号操作等全部流水；十大内容按 01—10 位置与 App 首页「事件纪」一一对应。
+- Web 管理端提供组织与账号、系统日志、十大内容与公司公告维护；App 保留任务标签，采用浅色背景与深色文字，没有选标签的任务按「长期任务」显示。系统日志汇总登录、写日志、评价日志、任务进展与审核、每日事项、账号操作等全部流水；十大内容按 01—10 位置与 App 首页「事件纪」一一对应。
 
 ## 演示账号
 
-首次启动后端时自动写入种子数据。登录填写下表的姓名和演示密码；内部 ID 仅用于数据关联，不再作为登录名。已有账号无手机号时可先用姓名登录，由管理员补全个人资料。
+仅显式启用 `demo` 配置时，首次启动后端才会写入演示种子数据。登录填写下表的姓名和演示密码；内部 ID 仅用于数据关联，不再作为登录名。已有账号无手机号时可先用姓名登录，由管理员补全个人资料。
 
 | 演示密码 | 姓名（登录填写） | 角色 | 部门 |
 | --- | --- | --- | --- |
@@ -59,7 +59,7 @@
 
 ## 本地运行
 
-本地演示模式会为内置演示账号补齐近 30 天的工作日志，以及近 7 天和未来 3 天的每日事项。每个账号尚未初始化的日期按已有数量补足至 6 项，保留已有事项和完成状态，避免同名重复；初始化后用户删除的事项不会重新生成。新日志标题含“演示”标识。启动时及每天北京时间 00:05 自动补齐，普通新建账号不会生成这些数据。若连接实际业务数据库，请设置环境变量 `PANDORA_DEMO_DATA_ENABLED=false` 关闭这项补充功能。
+本地演示模式会为内置演示账号补齐近 30 天的工作日志，以及近 7 天和未来 3 天的每日事项。每个账号尚未初始化的日期按已有数量补足至 6 项，保留已有事项和完成状态，避免同名重复；初始化后用户删除的事项不会重新生成。新日志标题含“演示”标识。启动时及每天北京时间 00:05 自动补齐，普通新建账号不会生成这些数据。`PANDORA_DEMO_DATA_ENABLED=false` 同时关闭初始演示账号和定时补充数据。正式环境默认关闭两者。
 
 环境要求：JDK 21、Node.js 20+、MySQL 8（本地 root 密码见团队内部记录）。Windows PowerShell 下 npm 命令请使用 `npm.cmd`。
 
@@ -67,10 +67,11 @@
 
 首次按下方说明准备好数据库，之后只需：
 
-1. 启动本机 MySQL 服务。
-2. 双击项目根目录的 `start.cmd`，等待提示“启动完成”。
-3. 打开 App 浏览器预览 `http://127.0.0.1:5173`，或 Web 管理端 `http://127.0.0.1:8080`。
-4. 使用完毕后双击 `stop.cmd`。
+1. 将 `.env.example` 复制为 `.env`，填写数据库密码和至少 32 字节的随机 JWT 密钥（例如用密码管理器生成 64 位随机字符）；该文件已被 Git 忽略。
+2. 启动本机 MySQL 服务。
+3. 双击项目根目录的 `start.cmd`，等待提示“启动完成”。
+4. 打开 App 浏览器预览 `http://127.0.0.1:5173`，或 Web 管理端 `http://127.0.0.1:8080`。
+5. 使用完毕后双击 `stop.cmd`。
 
 启动窗口可以关闭，服务在后台继续运行。重复启动时会复用已经运行的潘多拉服务；若端口被其他程序占用，会给出提示。停止脚本仅结束由该脚本启动且记录匹配的进程，不会停止 MySQL 或单独运行的其他服务。
 
@@ -90,16 +91,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\workspace.ps1 
 
 ```sql
 CREATE DATABASE pandora DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'pandora_app'@'localhost' IDENTIFIED BY 'pandora_dev_2026';
+CREATE USER 'pandora_app'@'localhost' IDENTIFIED BY '请替换为独立随机数据库密码';
 GRANT ALL PRIVILEGES ON pandora.* TO 'pandora_app'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-表结构由后端启动时按 `server/src/main/resources/schema.sql` 自动创建，空库首次启动自动写入演示数据。
+将上面设置的实际密码填写到 `.env` 的 `PANDORA_DB_PASSWORD`。表结构由后端按 `server/src/main/resources/schema.sql` 创建；只有演示配置会写入演示数据。
 
 ### 2. 启动后端（端口 8080）
 
 ```powershell
+# 手动启动不会自动读取根目录 .env，需先在当前终端设置环境变量
+$env:SPRING_PROFILES_ACTIVE='demo'
+$env:PANDORA_DB_PASSWORD='填写实际数据库密码'
+$env:PANDORA_JWT_SECRET='填写至少32字节的随机密钥'
 cd server
 .\mvnw.cmd spring-boot:run
 ```
@@ -122,20 +127,45 @@ npm.cmd start
 
 ```powershell
 cd pandora-app
+npm.cmd ci
 npm.cmd test
 npm.cmd run check
+npm.cmd run test:ui  # 自动启动预览服务，运行全部 9 组模拟 API 浏览器检查
 ```
 
 ### 5. 打包安卓 APK
 
 ```powershell
 cd pandora-app
-npm.cmd run build:android
+npm.cmd run build:android -- --api-base http://10.0.2.2:8080/api --allow-http
 ```
 
 构建脚本使用独立缓存的 Android 35 平台与构建工具，首次构建自动下载，无需安装 Android Studio 或 Gradle。
 
-真机运行时，App 通过 `pandora-app/android/src/com/pandora/demo/MainActivity.java` 中的 `API_BASE` 连接后端：模拟器默认 `http://10.0.2.2:8080/api`；真机需改为电脑在局域网中的 IP（如 `http://192.168.x.x:8080/api`），并保证手机与电脑在同一网络、后端已启动。
+打包时用 `--api-base` 指定后端，不再修改 Java 源码或硬编码电脑 IP。上例仅用于模拟器；真机演示请填写电脑实际局域网地址，并保证同一网络。默认要求 HTTPS，只有显式 `--allow-http` 才允许本地 HTTP 演示。构建不会修改源清单或自动递增版本号。
+
+正式签名必须使用 `--release --api-base https://实际域名/api --keystore 受保护密钥路径 --key-alias 发布别名 --version-code 新整数`，并在环境变量设置 `PANDORA_KEYSTORE_PASSWORD`（可另设 `PANDORA_KEY_PASSWORD`）。正式构建拒绝 HTTP 和默认演示签名；不带 `--release` 的包始终标记为演示包。仓库已有 APK 属于旧演示产物，使用修复版本需按实际服务器地址重新构建。
+
+## 正式部署与升级
+
+- 正式环境不启用 `demo` profile。注入独立的 `PANDORA_DB_URL`、`PANDORA_DB_USERNAME`、`PANDORA_DB_PASSWORD` 和 `PANDORA_JWT_SECRET`；默认不创建演示账号、不生成演示业务数据。曾提交过的数据库密码和 JWT 密钥应轮换，删掉源码中的值不能消除历史泄露。
+- 首次空库部署可设置 `PANDORA_BOOTSTRAP_ENABLED=true`、`PANDORA_BOOTSTRAP_ADMIN_PHONE`、`PANDORA_BOOTSTRAP_ADMIN_PASSWORD`（12～64 位且不超过 72 字节）。仅空库创建管理员，已有数据库不会被覆盖；完成后移除这些初始化变量。管理员再从 Web 端创建公司成员，公开注册接口始终拒绝建号。
+- 默认监听 `127.0.0.1:8080` 并要求 HTTPS。在同机反向代理配置有效 TLS 证书，将业务路径转发到该端口，覆盖客户端传入的 `Forwarded`/`X-Forwarded-*` 并写入可信协议、主机信息。不要将接受转发头的后端端口直接暴露公网。HTTPS 代理和证书需在实际环境配置。
+- 用户只能补充姓名、性别、身份证格式资料；部门、手机号、角色和启用状态由管理员维护。填写资料不代表身份已经核验。旧的“待分配”账号无法登录；过去已自行填过部门的注册账号无法仅凭现有字段可靠识别，需要管理员核对成员名单并停用非公司账号。
+- 后端 JAR 包含 Web 管理端资源，可独立运行；数据库仍需单独备份及配置。并发审核和任务写入使用数据库行锁，部署时请保留事务支持。
+
+真实前后端端到端检查使用独立 H2 数据库，不连接本地 MySQL，也不使用演示密码。安装浏览器依赖后，在根目录运行：
+
+```powershell
+cd pandora-app
+npm.cmd ci
+npx.cmd playwright install chromium
+cd ..
+$env:PANDORA_E2E='true'
+.\server\mvnw.cmd -f server/pom.xml verify
+```
+
+Windows 默认使用 Edge；其他系统使用 Playwright Chromium。可用 `PANDORA_BROWSER_CHANNEL` 指定浏览器渠道。`verify` 覆盖后端、真实浏览器业务闭环、Android 来源与 CSP，并构建 JAR。CI 工作流位于 `.github/workflows/verify.yml`。
 
 ## 接口概览
 
@@ -145,6 +175,7 @@ npm.cmd run build:android
 | --- | --- |
 | `POST /api/auth/login`、`GET /api/auth/me` | 登录、当前用户 |
 | `GET /api/workspace` | 工作区聚合数据（任务、成员、公告等） |
+| `GET /api/calendar/metadata?year=2026` | 自动同步的年度假期、调休、节气与同步状态，只读 |
 | `POST /api/tasks/requests` | 提交任务创建／编辑／删除申请 |
 | `POST /api/tasks/requests/{id}/review` | 审核变更申请 |
 | `POST /api/tasks/{id}/progress` | 记录任务文字进展 |
@@ -157,7 +188,15 @@ npm.cmd run build:android
 | `POST/DELETE /api/admin/announcements` | 公告维护 |
 | `GET/POST /api/admin/highlights`、`PUT/DELETE /api/admin/highlights/{id}` | 十大内容查询、录入、编辑、发布与删除 |
 
-数据库共 10 张表：`users`、`tasks`、`task_owners`、`task_history`、`change_requests`、`work_logs`、`log_versions`、`announcements`、`pins`、`highlights`，定义见 `server/src/main/resources/schema.sql`。
+数据库共 17 张表：`users`、`tasks`、`task_owners`、`task_history`、`change_requests`、`work_logs`、`log_versions`、`announcements`、`pins`、`highlights`、`tags`、`log_comments`、`daily_todos`、`demo_activity_days`、`operation_logs`、`workspace_notifications`、`calendar_years`，定义见 `server/src/main/resources/schema.sql`。
+
+### 日历自动更新
+
+- 日期和“今天”跟随设备本地时间，跨零点自动刷新；从后台恢复、重新联网或修改系统时间后也会检查。用户主动查看的其他日期保留，正在编辑的任务、事项与日志草稿不会改写日期。
+- 农历由浏览器中文历法计算；24 节气由服务端 `lunar-java 1.7.8` 按北京时间计算，支持 1900～2100 年，不需每年更新日期表。
+- 放假与调休无法仅靠日期算法推算。服务端启动后异步检查当年、次年，此后每 6 小时检查；浏览其他年份时也自动检查。使用 [holiday-cn](https://github.com/NateScarlet/holiday-cn) 提供的结构化数据及其中的政府公告来源。该项目是第三方整理源，并非政府实时接口；公告发布、数据源收录和下一次检查之间存在延迟。
+- 自动同步验证年份、有效日期、重复日期、休班类型和 HTTPS 政府公告链接。主地址不可用时自动尝试同一仓库的 jsDelivr 分发地址；全部失败、404 或响应无效时保留最近有效数据，不把未知安排当作已公布。数据库 `calendar_years` 和 App 本地缓存支持后续断网使用；首次启动预置已核实的 [2025 年公告](https://www.gov.cn/zhengce/zhengceku/202411/content_6986383.htm)及 [2026 年公告](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm)作为备用。新年度首次获取数据需服务端能访问 `raw.githubusercontent.com:443` 或 `fastly.jsdelivr.net:443`；分发缓存也可能产生更新延迟。
+- 无日历人工编辑页面或写入 API。重启更新后的后端会自动创建缓存表；Android 已安装的旧包需重新构建安装后才包含本次跨日刷新和自动加载逻辑。
 
 ## 项目结构
 
@@ -177,10 +216,10 @@ npm.cmd run build:android
 
 - 一期按甲方核心诉求交付任务—审核—日志闭环，未接入 AI 功能。
 - 变更审核目前为单层「另一位具备审核权限的角色审核」，逐级会签待甲方确认组织层级后扩展。
-- 账号密码为演示口令，JWT 密钥写在 `application.properties`，正式部署需改为环境变量并启用强密码策略。
+- 演示口令只用于显式演示环境；正式环境的初始管理员、密码和签名密钥由外部配置。
 - 安卓包为演示签名，正式发布需替换为受保护的发布签名。
-- 后端配置默认本机 MySQL（localhost:3306），多环境部署需按环境调整 `application.properties`。
+- 后端默认本机 MySQL（localhost:3306），多环境连接由环境变量配置。
 
 ## Web 管理后台升级
 
-管理端支持成员维护、公告编辑与置顶，以及公司重要事项、公司派发任务、个人重要事项的录入维护。任务申请与审核在 App 视图页处理。具体权限、数据库升级及验收方式见 [Web 管理端说明](web-admin/README.md)。
+管理端支持成员维护、公告编辑与置顶，以及公司重要事项、公司派发任务、个人重要事项的录入维护。任务申请在 App 任务页提交，审核在首页消息中处理。具体权限、数据库升级及验收方式见 [Web 管理端说明](web-admin/README.md)。

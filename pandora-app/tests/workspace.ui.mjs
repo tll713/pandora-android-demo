@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const require = createRequire(import.meta.url);
-const { chromium } = require(path.join(process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'playwright'));
-const browser = await chromium.launch({channel:process.env.PANDORA_BROWSER_CHANNEL || 'msedge',headless:true});
+import { chromium, browserChannel } from '../../scripts/browser-test.mjs';
+const browser = await chromium.launch({channel:browserChannel,headless:true});
 const context = await browser.newContext({viewport:{width:390,height:844},timezoneId:'Asia/Shanghai',locale:'zh-CN',hasTouch:true});
 const page = await context.newPage(), errors = [], moves = [];
 page.on('pageerror',e => errors.push(e.message));
@@ -24,6 +21,8 @@ const request = {id:'r1',kind:'create',proposer:'lin',status:'pending',createdAt
 const own = {...request,id:'r2',proposer:'admin',status:'approved',reviewedAt:'2026-11-11T10:00',after:{...request.after,title:'我的申请结果'}};
 const db = {members,tags,tasks,requests:[request,own],todos:[{id:'todo1',date:'2026-11-11',title:'保留完成状态的事项',done:true}],logs:[{id:'l1',author:'lin',date:'2026-11-11',title:'产品交付',content:'今日完成设计',tagId:'design',taskId:'t0',versions:[]}],pins:{},highlights:[],allowedAssignees:members,announcements:[]};
 await page.route('**/api/**',async route => {
+  const calendarUrl = new URL(route.request().url());
+  if (calendarUrl.pathname === '/api/calendar/metadata') return route.fulfill({json:{year:Number(calendarUrl.searchParams.get('year')),published:false,source:'',holidays:{},solarTerms:{}}});
   const req = route.request(), url = new URL(req.url());
   const respond = (body,status=200) => route.fulfill({status,json:body});
   if(url.pathname.endsWith('/workspace')) return respond({user:current,db});

@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const require = createRequire(import.meta.url);
-const runtime = process.env.PANDORA_RUNTIME_MODULES || path.join(homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules');
-const { chromium } = require(path.join(runtime, 'playwright'));
-const browser = await chromium.launch({ channel: process.env.PANDORA_BROWSER_CHANNEL || 'msedge', headless: true });
+import { chromium, browserChannel } from '../../scripts/browser-test.mjs';
+const browser = await chromium.launch({ channel: browserChannel, headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai', isMobile: true, hasTouch: true });
 const page = await context.newPage(), errors = [];
 page.on('pageerror', e => errors.push(e.message));
@@ -24,6 +20,8 @@ const db = { logs, members, tasks: [
 let historyRequests = 0, failHistory = false, releaseHistory;
 let historyGate = null, passwordCalls = 0;
 await page.route('**/api/**', async route => {
+  const calendarUrl = new URL(route.request().url());
+  if (calendarUrl.pathname === '/api/calendar/metadata') return route.fulfill({json:{year:Number(calendarUrl.searchParams.get('year')),published:false,source:'',holidays:{},solarTerms:{}}});
   const request = route.request(), url = new URL(request.url());
   const respond = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   if (url.pathname.endsWith('/auth/login')) return respond({ token: 'personal-ui-token', user: members[0] });

@@ -36,6 +36,9 @@ public class User {
     private long authVersion = 0;
 
     public boolean isEnabled() { return enabled; }
+    public boolean isOrganizationMember() {
+        return enabled && department != null && !department.isBlank() && !"待分配".equals(department);
+    }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public long getAuthVersion() { return authVersion; }
     public void setAuthVersion(long authVersion) { this.authVersion = authVersion; }
