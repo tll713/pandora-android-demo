@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -62,7 +63,24 @@ public class TodoService {
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("事项日期格式不正确");
         }
+        if (date.isBefore(LocalDate.now(ZoneId.of("Asia/Shanghai"))))
+            throw new IllegalArgumentException("只能移到今天及以后的日期");
+        if (date.equals(todo.getDate())) return todo;
+        todo.setPreviousDate(todo.getDate());
+        todo.setMoveToken(UUID.randomUUID().toString());
         todo.setDate(date);
+        return todoRepository.save(todo);
+    }
+
+    @Transactional
+    public DailyTodo undoMove(String ownerId, String id, String token) {
+        DailyTodo todo = own(ownerId, id);
+        if (token == null || !token.equals(todo.getMoveToken()) || todo.getPreviousDate() == null)
+            throw new IllegalArgumentException("事项已再次改期，无法撤销这次移动");
+        // Undo can restore an overdue date, but cannot choose an arbitrary past date.
+        todo.setDate(todo.getPreviousDate());
+        todo.setPreviousDate(null);
+        todo.setMoveToken(null);
         return todoRepository.save(todo);
     }
 

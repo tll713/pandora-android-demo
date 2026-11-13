@@ -5,7 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/** Records completed demo checklist initialization so deleted items stay deleted. */
+/** Records completed sample checklist and log initialization so missing records stay missing. */
 @Entity
 @Table(name = "demo_activity_days")
 public class DemoActivityDay {

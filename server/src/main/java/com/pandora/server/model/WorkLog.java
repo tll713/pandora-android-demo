@@ -29,6 +29,9 @@ public class WorkLog {
     @Column(name = "tag_id", length = 40)
     private String tagId;
 
+    @Column(name = "is_demo", nullable = false)
+    private boolean demo;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
     private LocalDateTime createdAt;
@@ -55,6 +58,8 @@ public class WorkLog {
     public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getTagId() { return tagId; }
     public void setTagId(String tagId) { this.tagId = tagId; }
+    public boolean isDemo() { return demo; }
+    public void setDemo(boolean demo) { this.demo = demo; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

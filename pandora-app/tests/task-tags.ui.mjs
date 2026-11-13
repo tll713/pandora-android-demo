@@ -69,7 +69,7 @@ try {
     assert.equal(await badge.locator('> *').count(),0);
   }
   await page.locator('[data-close]').click();
-  await page.locator('.calendar-selected-agenda [data-mode=day]').click();
+  await page.locator('.calendar-selected-agenda [data-mode=week]').click();
   for (const tag of tags) {
     const event = page.locator(`.timeline-item[data-id=${tag.id}]`);
     assert.deepEqual(await computedColors(event),expected[tag.id]);

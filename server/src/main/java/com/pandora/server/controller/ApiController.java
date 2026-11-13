@@ -246,6 +246,19 @@ public class ApiController {
         }
     }
 
+    @PostMapping("/todos/{id}/date/undo")
+    public ResponseEntity<?> undoTodoMove(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                         @RequestBody Map<String, String> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        try {
+            DailyTodo todo = todoService.undoMove(ud.getUsername(), id, body.get("token"));
+            audit(userRepository.findById(ud.getUsername()).orElse(null), "撤销事项改期", todo.getTitle(), "日期 " + todo.getDate());
+            return ResponseEntity.ok(todoToMap(todo));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @DeleteMapping("/todos/{id}")
     public ResponseEntity<?> deleteTodo(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
@@ -263,6 +276,7 @@ public class ApiController {
         map.put("date", todo.getDate().toString());
         map.put("title", todo.getTitle());
         map.put("done", todo.isDone());
+        map.put("moveToken", todo.getMoveToken());
         return map;
     }
 
@@ -626,6 +640,7 @@ public class ApiController {
 
     private Map<String, Object> logToMap(WorkLog l) {
         Map<String, Object> m = new HashMap<>();
+        m.put("demo", l.isDemo());
         m.put("id", l.getId());
         m.put("author", l.getAuthorId());
         m.put("authorName", userRepository.findById(l.getAuthorId()).map(User::getName).orElse(l.getAuthorId()));

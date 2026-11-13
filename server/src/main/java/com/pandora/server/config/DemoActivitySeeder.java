@@ -5,6 +5,7 @@ import com.pandora.server.model.DemoActivityDay;
 import com.pandora.server.model.User;
 import com.pandora.server.model.WorkLog;
 import com.pandora.server.repository.DailyTodoRepository;
+import com.pandora.server.repository.LogCommentRepository;
 import com.pandora.server.repository.DemoActivityDayRepository;
 import com.pandora.server.repository.UserRepository;
 import com.pandora.server.repository.WorkLogRepository;
@@ -24,7 +25,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Adds missing activity only for the named demo accounts; existing work stays untouched. */
+/** Initializes activity and mixed submission states only for the named local sample accounts. */
 @Component
 @EnableScheduling
 @ConditionalOnProperty(name = "pandora.demo-data.enabled", havingValue = "true")
@@ -84,13 +85,15 @@ public class DemoActivitySeeder {
     private final WorkLogRepository logs;
     private final DailyTodoRepository todos;
     private final DemoActivityDayRepository initializedDays;
+    private final LogCommentRepository comments;
 
     public DemoActivitySeeder(UserRepository users, WorkLogRepository logs, DailyTodoRepository todos,
-                              DemoActivityDayRepository initializedDays) {
+                              DemoActivityDayRepository initializedDays, LogCommentRepository comments) {
         this.users = users;
         this.logs = logs;
         this.todos = todos;
         this.initializedDays = initializedDays;
+        this.comments = comments;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -104,25 +107,7 @@ public class DemoActivitySeeder {
         for (User user : users.findAll()) {
             if (!user.isEnabled() || !user.getName().equals(DEMO_USERS.get(user.getId()))) continue;
             String[][] topics = topicsFor(user);
-            Set<LocalDate> writtenDays = logs.findByAuthorIdAndDateBetween(user.getId(), today.minusDays(29), today)
-                    .stream().map(WorkLog::getDate).collect(Collectors.toCollection(HashSet::new));
-            for (int offset = 29; offset >= 0; offset--) {
-                LocalDate day = today.minusDays(offset);
-                if (writtenDays.contains(day)) continue;
-                String id = "demo-log-" + user.getId() + "-" + day;
-                if (logs.existsById(id)) continue;
-                int index = Math.floorMod((int) day.toEpochDay() + user.getId().hashCode(), topics.length);
-                String[] topic = topics[index];
-                WorkLog log = new WorkLog();
-                log.setId(id);
-                log.setAuthorId(user.getId());
-                log.setDate(day);
-                log.setTitle(day + " " + topic[0] + "（演示）");
-                log.setContent("今日完成\n" + topic[1] + "\n\n协作与待确认\n已同步相关同事，待确认项继续跟进。\n\n下一步计划\n" + topics[(index + 1) % topics.length][1]);
-                log.setTaskId("");
-                logs.save(log);
-                writtenDays.add(day);
-            }
+            initializeLogs(user, topics, today);
             Map<LocalDate, List<DailyTodo>> plannedDays = todos.findByOwnerIdOrderByDateAscCreatedAtAsc(user.getId()).stream()
                     .collect(Collectors.groupingBy(DailyTodo::getDate));
             // Keep the rest of this month populated, with at least three future days at month end.
@@ -154,6 +139,59 @@ public class DemoActivitySeeder {
                 initializedDays.save(new DemoActivityDay(dayId));
             }
         }
+    }
+
+    private void initializeLogs(User user, String[][] topics, LocalDate today) {
+        String initializationId = "logs-v2-" + user.getId();
+        if (initializedDays.existsById(initializationId)) return;
+        // Upgrade only flagged seed records. User submissions, versions and comments survive.
+        for (WorkLog log : logs.findByAuthorId(user.getId())) {
+            if (!log.isDemo()) continue;
+            boolean hasWork = log.getVersions() != null && !log.getVersions().isEmpty()
+                    || !comments.findByLogIdOrderByCreatedAtDesc(log.getId()).isEmpty();
+            if (hasWork || shouldSubmit(user.getId(), log.getDate())) {
+                log.setDemo(false);
+                log.setTitle(log.getTitle().replaceFirst("（演示）$", ""));
+                logs.save(log);
+            } else {
+                logs.delete(log);
+            }
+            initializedDays.save(new DemoActivityDay(logDayId(user.getId(), log.getDate())));
+        }
+        logs.flush();
+        Set<LocalDate> writtenDays = logs.findByAuthorIdAndDateBetween(user.getId(), today.minusDays(29), today)
+                .stream().map(WorkLog::getDate).collect(Collectors.toCollection(HashSet::new));
+        for (int offset = 29; offset >= 0; offset--) {
+            LocalDate day = today.minusDays(offset);
+            String dayId = logDayId(user.getId(), day);
+            if (initializedDays.existsById(dayId)) continue;
+            initializedDays.save(new DemoActivityDay(dayId));
+            if (writtenDays.contains(day) || !shouldSubmit(user.getId(), day)) continue;
+            String id = "demo-log-" + user.getId() + "-" + day;
+            if (logs.existsById(id)) continue;
+            int index = Math.floorMod((int) day.toEpochDay() + user.getId().hashCode(), topics.length);
+            String[] topic = topics[index];
+            WorkLog log = new WorkLog();
+            log.setDemo(false);
+            log.setId(id);
+            log.setAuthorId(user.getId());
+            log.setDate(day);
+            log.setTitle(day + " " + topic[0]);
+            log.setContent("今日完成\n" + topic[1] + "\n\n协作与待确认\n已同步相关同事，待确认项继续跟进。\n\n下一步计划\n" + topics[(index + 1) % topics.length][1]);
+            log.setTaskId("");
+            logs.save(log);
+            writtenDays.add(day);
+        }
+        initializedDays.save(new DemoActivityDay(initializationId));
+    }
+
+    // Stable per account/date: about two thirds submitted, one third left unsubmitted.
+    static boolean shouldSubmit(String userId, LocalDate day) {
+        return Math.floorMod(day.toEpochDay() + userId.hashCode(), 3) != 0;
+    }
+
+    private String logDayId(String userId, LocalDate day) {
+        return "logs-v2-" + userId + "-" + day;
     }
 
     private String[][] topicsFor(User user) {

@@ -24,6 +24,16 @@ public class DailyTodo {
     @Column(nullable = false)
     private boolean done;
 
+    @Column(name = "previous_date")
+    private LocalDate previousDate;
+
+    @Column(name = "move_token", length = 36)
+    private String moveToken;
+
+    @Version
+    @Column(nullable = false)
+    private long revision;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -37,6 +47,10 @@ public class DailyTodo {
     public void setTitle(String title) { this.title = title; }
     public boolean isDone() { return done; }
     public void setDone(boolean done) { this.done = done; }
+    public LocalDate getPreviousDate() { return previousDate; }
+    public void setPreviousDate(LocalDate previousDate) { this.previousDate = previousDate; }
+    public String getMoveToken() { return moveToken; }
+    public void setMoveToken(String moveToken) { this.moveToken = moveToken; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

@@ -3,18 +3,19 @@ import {
   visibleTasks, visibleLogs, recentLogs, canSeeTask, canManageTask, canWorkOnTask, canEditLog, canViewLog,
   requestTaskChange, reviewTaskChange, visibleRequests, canReviewRequest,
   updateTaskDetail, completeTask, saveLog, togglePin, allowedAssignees,
-  calendarDays, shiftCalendar, isOverdue, taskStartAt, taskOccursOn, calendarWeekLayout, logSections, composeLogSections
+  calendarDays, shiftCalendar, isOverdue, taskStartAt, taskOccursOn, calendarWeekLayout, logSections, composeLogSections,
+  isDemoLog, taskMatchesQuery, taskDayLayout, isValidDate
 } from './domain.js';
 
 const root = document.querySelector('#app'), modal = document.querySelector('#modal'), toast = document.querySelector('#toast');
 const API = window.__PANDORA_API_BASE__ || (location.port === '5173' ? `${location.protocol}//${location.hostname}:8080/api` : '/api');
 
 const state = { token: localStorage.getItem('pandora.token'), user: null, route: 'dashboard', filter: 'all',
-  calendarMode: 'month', calendarDate: dateKey(), todoDate: dateKey(), logRange: '7', logQuery: '', logComments: {},
+  calendarMode: 'month', calendarDate: dateKey(), todoDate: dateKey(), todoMode: 'week', logRange: '7', logQuery: '', logComments: {},
   logDepartment: '', logRole: '', logAuthor: '', logFrom: '', logTo: '', logSubmission: 'all', logCheckDate: dateKey(), messageFilter: 'all',
   taskQuery: '', taskPriority: '', taskScope: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null,
   calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
-const APP_VERSION = '0.5.8';
+const APP_VERSION = '0.5.9';
 let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '';
 
 function validCalendarMetadata(data, year) {
@@ -31,7 +32,7 @@ function readCalendarCache() {
   } catch { return {}; }
 }
 function refreshView() {
-  if (modal.open || (root.contains(document.activeElement) && document.activeElement.closest('form'))) {
+  if (document.body.classList.contains('todo-dragging') || modal.open || root.querySelector('[data-form=todo] [name=title]')?.value.trim() || (root.contains(document.activeElement) && document.activeElement.closest('form'))) {
     deferredRender = true; return;
   }
   render(true);
@@ -43,7 +44,7 @@ function checkSystemDate() {
   if (today !== observedToday) {
     if (state.calendarDate === observedToday) state.calendarDate = today;
     if (state.todoDate === observedToday) {
-      if (modal.open) deferredTodoDate ||= observedToday;
+      if (modal.open || root.querySelector('[data-form=todo] [name=title]')?.value.trim() || root.querySelector('[data-form=todo]')?.contains(document.activeElement)) deferredTodoDate ||= observedToday;
       else state.todoDate = today;
     }
     if (state.logCheckDate === observedToday) state.logCheckDate = today;
@@ -58,20 +59,30 @@ function checkSystemDate() {
 // ============ API 客户端 ============
 async function api(path, options = {}) {
   let res;
+  const requestToken = state.token;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
     res = await fetch(API + path, {
       ...options,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(state.token ? { Authorization: 'Bearer ' + state.token } : {}) }
+      headers: { 'Content-Type': 'application/json', ...(requestToken ? { Authorization: 'Bearer ' + requestToken } : {}) }
     });
   } catch {
     throw new Error('暂时无法连接服务，请检查网络连接后重试');
   } finally {
     clearTimeout(timer);
   }
-  if (res.status === 401) { logout(); throw new Error('登录已过期，请重新登录'); }
+  if (res.status === 401) {
+    // Older servers can return 401 from their error dispatcher for a missing or
+    // failed endpoint. Confirm the session before discarding a valid login.
+    if (state.token !== requestToken) throw new Error('登录状态已变更，请重试');
+    if (requestToken && path !== '/auth/me') {
+      await api('/auth/me');
+      throw new Error('该功能暂时无法加载，请稍后重试');
+    }
+    logout(); throw new Error('登录已过期，请重新登录');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || '请求失败');
   return data;
@@ -182,11 +193,17 @@ const taskColorStyle = task => {
   return `background:${bg};color:${fg};border-color:${bg}`;
 };
 const button = (label, action, id = '', cls = 'ghost-button') => `<button type="button" class="${cls}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
-function notify(text, error = false) {
+function notify(text, error = false, undo = null) {
   toast.textContent = text; toast.dataset.type = error ? 'error' : 'success'; toast.classList.add('toast--show');
-  clearTimeout(notify.timer); notify.timer = setTimeout(() => toast.classList.remove('toast--show'), 3000);
+  if (undo) {
+    const control = document.createElement('button'); control.type = 'button'; control.textContent = '撤销';
+    control.onclick = async () => { control.disabled = true; await undo(); };
+    toast.append(control);
+  }
+  clearTimeout(notify.timer); notify.timer = setTimeout(() => toast.classList.remove('toast--show'), undo ? 10000 : 3000);
 }
 function open(title, body) {
+  modal.classList.remove('todo-dialog');
   modal.dataset.log = '';
   modal.dataset.todo = '';
   modal.dataset.messages = '';
@@ -218,7 +235,7 @@ function reportContent(content) {
   if (sections.content === content) return `<p class="log-content">${esc(content)}</p>`;
   return `<div class="report-sections">${[['今日完成',sections.content],['下一步计划',sections.plan],['问题与协助',sections.issues]].map(([title,text]) => `<section><h4>${title}</h4><p class="log-content">${esc(text || '未填写')}</p></section>`).join('')}</div>`;
 }
-function logCard(l) { const author = userById(l.author); return `<article class="log-card"><div class="log-card-top"><b>${esc(author?.name)}</b><span>${l.date}${l.date === dateKey() ? ' · 今天' : ''}</span></div><small class="log-author-info">${esc(author?.department || '')} · ${esc(author?.roleName || author?.role || '')}</small><h3>${button(esc(l.title), 'log', l.id, 'log-title-button')}</h3>${l.tagId ? tagBadge(l) : ''}${reportContent(l.content)}${l.versions?.length ? `<small>保留 ${l.versions.length} 次修改记录</small>` : ''}</article>`; }
+function logCard(l) { const author = userById(l.author); return `<article class="log-card"><div class="log-card-top"><b>${esc(author?.name)}</b><span>${l.date}${l.date === dateKey() ? ' · 今天' : ''}</span></div><small class="log-author-info">${esc(author?.department || '')} · ${esc(author?.roleName || author?.role || '')}</small>${isDemoLog(l) ? '<p class="demo-log-note">演示记录 · 不计入提交统计</p>' : ''}<h3>${button(esc(l.title), 'log', l.id, 'log-title-button')}</h3>${l.tagId ? tagBadge(l) : ''}${reportContent(l.content)}${l.versions?.length ? `<small>保留 ${l.versions.length} 次修改记录</small>` : ''}</article>`; }
 
 function loginPage() {
   return `<div class="login-page"><div class="login-card"><div class="brand login-brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><h1>欢迎回来</h1><p class="login-sub">登录你的工作账号</p><form data-form="login"><label>手机号或姓名<input name="identifier" required autocomplete="username" placeholder="请输入手机号或姓名"></label><label>密码<input type="password" name="password" required autocomplete="current-password" placeholder="请输入密码"></label><button class="primary-button login-button" type="submit">登录</button></form><p class="help-note">账号由公司管理员创建，无法登录时请联系管理员。</p></div></div>`;
@@ -235,16 +252,16 @@ function dashboard() {
   const highlights = state.db.highlights || [];
   const company = highlights.filter(h => h.kind === 'company' && h.enabled !== false).sort((a, b) => a.position - b.position).slice(0, 10);
   const today = dateKey();
-  const todos = (state.db.todos || []).filter(t => t.date === today);
+  const todos = (state.db.todos || []).filter(t => t.date === state.todoDate);
   const highlightRows = list => list.map(h => `<button class="tile-row" data-action="highlight" data-id="${esc(h.id)}"><span class="tile-rank">${String(h.position).padStart(2,'0')}</span><span class="tile-row-main"><b>${esc(h.title)}</b><small>${esc(h.content)}</small></span></button>`).join('');
   const chevron = '<svg class="tile-arrow" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const tile = (title, action, content, count) => `<section class="dashboard-tile"><header><div><span>${count}</span><h2>${title}</h2></div><button class="tile-open" data-action="${action}" aria-label="打开${title}">${chevron}</button></header><div class="tile-content${action === 'todo-calendar' ? '' : ' tile-scroll'}"${action === 'todo-calendar' ? '' : ` role="region" aria-label="${title}列表，可上下滑动" tabindex="0"`}>${content}</div></section>`;
+  const tile = (title, action, content, count) => `<section class="dashboard-tile"><header><div><span>${count}</span><h2>${title}</h2></div><button class="tile-open" data-action="${action}" ${action === 'todo-calendar' ? `aria-expanded="${state.todoMode === 'month'}" aria-label="${state.todoMode === 'month' ? '收起月视图' : '展开月视图'}"` : `aria-label="打开${title}"`}>${chevron}</button></header><div class="tile-content${action === 'todo-calendar' ? '' : ' tile-scroll'}"${action === 'todo-calendar' ? '' : ` role="region" aria-label="${title}列表，可上下滑动" tabindex="0"`}>${content}</div></section>`;
   const taskRows = (list, emptyText) => list.length ? list.map(t => `<button class="tile-row" data-action="task" data-id="${esc(t.id)}"><span class="tile-marker tile-marker--${t.priority}"></span><span class="tile-row-main"><b>${esc(t.title)}</b><small>${STATUS[t.status]} · ${dueText(t.dueAt)}</small></span></button>`).join('') : `<p class="tile-empty">${emptyText}</p>`;
   const doneToday = todos.filter(t => t.done).length;
   const unread = unreadMessages();
   const messageButton = `<button class="dashboard-messages" data-action="messages-open" aria-label="消息${unread ? `，${unread} 条未读` : ''}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>消息</span>${unread ? `<em class="message-badge" aria-hidden="true">${unread > 99 ? '99+' : unread}</em>` : ''}</button>`;
   return `<section class="dashboard-page"><header class="dashboard-head"><div><span class="eyebrow">${dateKey()}</span><h1>你好，${esc(user().name)}</h1></div>${messageButton}</header><div class="dashboard-grid">` +
-    tile('事件纪', 'company-highlights', (highlightRows(company) || '<p class="tile-empty">暂无重要事项</p>') + button('公司公告', 'announcements-open', '', 'text-button'), String(company.length).padStart(2, '0')) +
+    tile('事件纪', 'company-highlights', (highlightRows(company) || '<p class="tile-empty">暂无重要事项</p>'), String(company.length).padStart(2, '0')) +
     tile('任务看板', 'all-tasks', taskRows(myTasks, '暂无派发给你的任务'), String(myTasks.length).padStart(2, '0')) +
     tile('每日事项', 'todo-calendar', todoCalendarHtml(true), `${String(doneToday).padStart(2, '0')}/${String(todos.length).padStart(2, '0')}`) +
     `</div></section>`;
@@ -256,17 +273,19 @@ const todoDayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
 function todoCalendarHtml(compact = false) {
   const [year, month] = state.todoDate.split('-').map(Number);
   const first = new Date(year, month - 1, 1);
-  const start = new Date(year, month - 1, 1 - first.getDay());
+  const isMonth = state.todoMode === 'month';
+  const selected = new Date(`${state.todoDate}T12:00:00`);
+  const start = isMonth ? new Date(year, month - 1, 1 - first.getDay()) : new Date(year, month - 1, selected.getDate() - selected.getDay());
   const todos = state.db.todos || [];
   const daysInMonth = new Date(year,month,0).getDate();
-  const cells = Array.from({ length: Math.ceil((first.getDay()+daysInMonth)/7)*7 }, (_, i) => {
+  const cells = Array.from({ length: isMonth ? Math.ceil((first.getDay()+daysInMonth)/7)*7 : 7 }, (_, i) => {
     const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const key = todoDayKey(d);
     const items = todos.filter(t => t.date === key);
-    return `<article class="todo-month-cell ${d.getMonth() === month - 1 ? '' : 'is-out'} ${key === state.todoDate ? 'is-selected' : ''} ${key === dateKey() ? 'is-today' : ''}" data-todo-drop="${key}"><button class="todo-date" data-action="todo-select" data-id="${key}" aria-label="查看 ${key} 事项">${d.getDate()}</button>${items.slice(0, 3).map(t => `<button class="todo-drag-item ${t.done ? 'is-done' : ''}" draggable="true" data-todo-drag="${esc(t.id)}" data-action="todo-select" data-id="${key}" title="${esc(t.title)}；长按拖动可改期">${esc(t.title)}</button>`).join('')}${items.length > 3 ? button(`+${items.length - 3}`, 'todo-select', key, 'calendar-more') : ''}</article>`;
+    return `<article class="todo-month-cell ${d.getMonth() === month - 1 ? '' : 'is-out'} ${key === state.todoDate ? 'is-selected' : ''} ${key === dateKey() ? 'is-today' : ''}" data-todo-drop="${key}" data-past="${key < dateKey()}"><button class="todo-date" data-action="todo-select" data-id="${key}" aria-pressed="${key === state.todoDate}" aria-label="查看 ${key} 事项">${d.getDate()}</button>${isMonth ? items.slice(0, 3).map(t => `<button class="todo-drag-item ${t.done ? 'is-done' : ''}" draggable="true" data-todo-drag="${esc(t.id)}" data-action="todo-reschedule" data-id="${esc(t.id)}" title="${esc(t.title)}；长按拖动可改期">${esc(t.title)}</button>`).join('') : `<span class="todo-date-count">${items.length ? `${items.length} 项` : ''}</span>`}${isMonth && items.length > 3 ? `<button class="calendar-more" data-action="todo-overflow" data-id="${key}" aria-label="查看 ${key} 全部 ${items.length} 项事项">+${items.length - 3}</button>` : ''}</article>`;
   }).join('');
-  return `<div class="todo-calendar">
-    <header class="todo-cal-head"><button class="icon-button" data-action="todo-month-prev" aria-label="上个月">‹</button><b>${year} 年 ${month} 月</b><button class="icon-button" data-action="todo-month-next" aria-label="下个月">›</button></header>
+  return `<div class="todo-calendar todo-calendar--${state.todoMode}" id="todo-calendar">
+    <header class="todo-cal-head"><button class="icon-button" data-action="todo-month-prev" aria-label="${isMonth ? '上个月' : '上一周'}">‹</button><b>${year} 年 ${month} 月</b><button class="text-button" data-action="todo-today">今天</button><button class="icon-button" data-action="todo-month-next" aria-label="${isMonth ? '下个月' : '下一周'}">›</button></header>
     <div class="todo-week">${['日', '一', '二', '三', '四', '五', '六'].map(w => `<span>${w}</span>`).join('')}</div>
     <div class="todo-grid">${cells}</div>
     ${todoDayHtml()}<p class="todo-drag-tip">${compact ? '长按事项拖到其他日期，或点开事项改期' : '拖动事项到其他日期，也可使用“改期”'}</p>
@@ -278,33 +297,37 @@ function todoDayHtml() {
   const done = dayTodos.filter(t => t.done).length;
   return `<section class="todo-day">
       <div class="todo-day-head"><b>${shortDate(state.todoDate)} 事项</b><span>${dayTodos.length ? `${done}/${dayTodos.length} 已完成` : '暂无事项'}</span></div>
-      <div class="todo-list">${dayTodos.map(t => `<div class="todo-item ${t.done ? 'is-done' : ''}" draggable="true" data-todo-drag="${esc(t.id)}"><button class="todo-check" data-action="todo-toggle" data-id="${esc(t.id)}" aria-label="切换完成">${t.done ? '✓' : ''}</button><b>${esc(t.title)}</b>${button('改期', 'todo-reschedule', t.id, 'text-button')}<button class="todo-remove" data-action="todo-delete" data-id="${esc(t.id)}" aria-label="删除事项">×</button></div>`).join('') || '<p class="panel-note">这一天还没有事项</p>'}</div>
-      <form class="todo-form" data-form="todo"><input name="title" maxlength="120" required placeholder="添加事项，例如：提交周报"><button class="soft-button" type="submit">添加</button></form>
+      <div class="todo-list">${dayTodos.map(t => `<div class="todo-item ${t.done ? 'is-done' : ''}" draggable="true" data-todo-drag="${esc(t.id)}"><button class="todo-check" data-action="todo-toggle" data-id="${esc(t.id)}" aria-label="切换完成">${t.done ? '✓' : ''}</button><button class="todo-item-title" data-action="todo-reschedule" data-id="${esc(t.id)}">${esc(t.title)}</button>${button('改期', 'todo-reschedule', t.id, 'text-button')}<button class="todo-remove" data-action="todo-delete" data-id="${esc(t.id)}" aria-label="删除事项">×</button></div>`).join('') || '<p class="panel-note">这一天还没有事项</p>'}</div>
+      <form class="todo-form" data-form="todo" data-date="${state.todoDate}"><input name="title" maxlength="120" required placeholder="添加事项，例如：提交周报"><button class="soft-button" type="submit">添加</button></form>
     </section>`;
 }
 
 function openTodoCalendar(date = state.todoDate) {
   state.todoDate = date;
-  open('每日事项', todoCalendarHtml());
-  modal.dataset.todo = '1';
+  state.todoMode = 'month';
+  if (modal.open) close();
+  state.route = 'dashboard'; render();
+  root.querySelector('.todo-calendar')?.scrollIntoView({block:'nearest'});
 }
 
 function openTodoDay(date = state.todoDate) {
   state.todoDate = date;
-  open(`${shortDate(date)} · 每日事项`, `<div class="todo-day-details">${todoDayHtml()}${button('查看月历', 'todo-calendar', '', 'ghost-button')}</div>`);
-  modal.dataset.todo = 'day';
+  render(true);
+  open(`${shortDate(date)} · 全部事项`, `<div class="todo-day-details">${todoDayHtml()}</div>`);
+  modal.dataset.todo = 'overflow';
+  modal.classList.add('todo-dialog');
 }
 
 function refreshTodoDialog() {
   if (modal.open && modal.dataset.todo) {
-    if (modal.dataset.todo === 'day') openTodoDay(); else openTodoCalendar();
+    if (modal.dataset.todo === 'overflow') openTodoDay();
   }
 }
 
 function shiftTodoMonth(delta) {
   const [year, month] = state.todoDate.split('-').map(Number);
-  state.todoDate = todoDayKey(new Date(year, month - 1 + delta, 1));
-  if (modal.open) openTodoCalendar(); else render();
+  state.todoDate = state.todoMode === 'week' ? dayOffset(delta * 7, state.todoDate) : todoDayKey(new Date(year, month - 1 + delta, Math.min(Number(state.todoDate.slice(-2)),new Date(year,month+delta,0).getDate())));
+  render(true);
 }
 
 async function todoAction(path, message, method = 'POST') {
@@ -320,11 +343,11 @@ async function todoAction(path, message, method = 'POST') {
 function taskListView() {
   const tasks = visibleTasks(state.db, user()), pinned = state.db.pins?.[user().id] || [];
   const query = state.taskQuery.trim().toLocaleLowerCase();
-  const filtered = tasks.filter(t => state.filter === 'focus' ? pinned.includes(t.id) : state.filter === 'all' || t.status === state.filter)
+  const filtered = tasks.filter(t => state.filter === 'focus' ? pinned.includes(t.id) : state.filter === 'unfinished' ? t.status !== 'done' : state.filter === 'all' || t.status === state.filter)
     .filter(t => (!state.taskPriority || t.priority === state.taskPriority) && (!state.taskScope || t.owners.includes(user().id)))
-    .filter(t => !query || `${t.title} ${t.detail} ${names(t.owners)}`.toLocaleLowerCase().includes(query));
+    .filter(t => taskMatchesQuery(t, query));
   const active = Boolean(state.taskQuery || state.taskPriority || state.taskScope || state.filter !== 'all');
-  const statusFilters = `<div class="segmented task-status-filters" role="group" aria-label="任务状态">${[['all', '全部'], ['focus', '个人重点'], ...Object.entries(STATUS)].map(([id, label]) => `<button class="segment ${state.filter === id ? 'is-active' : ''}" aria-pressed="${state.filter === id}" data-filter="${id}">${label}</button>`).join('')}</div>`;
+  const statusFilters = `<div class="segmented task-status-filters" role="group" aria-label="任务状态">${[['all', '全部'], ['unfinished', '未完成'], ['focus', '个人重点'], ...Object.entries(STATUS)].map(([id, label]) => `<button class="segment ${state.filter === id ? 'is-active' : ''}" aria-pressed="${state.filter === id}" data-filter="${id}">${label}</button>`).join('')}</div>`;
   const searchForm = `<form class="task-search" data-form="task-filter" role="search"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" name="query" data-task-query value="${esc(state.taskQuery)}" placeholder="任务、说明或负责人" aria-label="搜索任务" autocomplete="off"></label><select name="priority" data-task-select aria-label="筛选优先级"><option value="">全部优先级</option>${Object.entries(PRIORITY).map(([value, label]) => `<option value="${value}" ${state.taskPriority === value ? 'selected' : ''}>${label}</option>`).join('')}</select><select name="scope" data-task-select aria-label="筛选负责人范围"><option value="">全部可见任务</option><option value="mine" ${state.taskScope ? 'selected' : ''}>我负责的</option></select>${active ? button('重置', 'clear-task-search', '', 'text-button task-reset') : ''}</form>`;
   const table = `<p class="task-table-hint">左右滑动查看负责人和截止时间</p><section class="task-table-panel" aria-label="任务表格"><table class="task-table"><thead><tr><th scope="col">任务名称</th><th scope="col">状态 / 优先级</th><th scope="col">负责人</th><th scope="col">起止时间</th></tr></thead><tbody>${filtered.map(t => `<tr class="${t.status === 'done' ? 'is-done' : ''}"><td><button class="task-title-button" data-action="task" data-id="${esc(t.id)}"><span class="task-tag-dot" style="background:${taskPalette(t).bg}" title="${esc(taskTag(t)?.name || '长期任务')}"></span>${esc(t.title)}</button>${tagBadge(t)}<small>${esc(t.detail)}</small></td><td><div class="task-table-pills">${statusPill(t.status)}${priorityPill(t.priority)}</div></td><td>${esc(names(t.owners))}</td><td class="due ${isOverdue(t) ? 'due--late' : ''}">${dueText(taskStartAt(t))}<br>${dueText(t.dueAt)}</td></tr>`).join('')}</tbody></table></section>`;
   return `<div class="task-filter-bar"><div class="task-filter-head">${statusFilters}<span class="filter-count" role="status" title="共 ${filtered.length} 项任务">${filtered.length}</span></div>${searchForm}</div>` + (filtered.length ? table + '<p class="task-live-empty" hidden>没有匹配的任务，换个关键词试试</p>' : empty('当前筛选没有任务'));
@@ -337,24 +360,30 @@ function resetLogFilters() {
 function readLogFilters(form) {
   const values = Object.fromEntries(new FormData(form));
   for (const [name,key] of Object.entries({query:'logQuery',department:'logDepartment',role:'logRole',author:'logAuthor',from:'logFrom',to:'logTo',submission:'logSubmission',checkDate:'logCheckDate'})) state[key] = values[name] || (name === 'submission' ? 'all' : name === 'checkDate' ? dateKey() : '');
+  if (!isGlobal(user())) state.logDepartment = '';
   if (state.logAuthor && !USERS.some(u => u.id === state.logAuthor && canViewLog(user(),u.id) && (!state.logDepartment || u.department === state.logDepartment) && (!state.logRole || u.role === state.logRole))) state.logAuthor = '';
   if (state.logFrom || state.logTo) state.logRange = 'all';
   if (state.logFrom && state.logTo && state.logFrom > state.logTo) { [state.logFrom,state.logTo] = [state.logTo,state.logFrom]; }
 }
 function logsPage() {
   const supervisor = isSupervisor(user()), allLogs = visibleLogs(state.db,user());
+  if (!isGlobal(user())) state.logDepartment = '';
   const members = USERS.filter(u => canViewLog(user(),u.id));
   const authors = members.filter(u => (!state.logDepartment || u.department === state.logDepartment) && (!state.logRole || u.role === state.logRole) && (!state.logAuthor || u.id === state.logAuthor));
   const reportingMembers = authors.filter(u => u.enabled !== false);
   const ids = new Set(authors.map(u => u.id));
   const from = state.logSubmission === 'submitted' ? state.logCheckDate : state.logFrom || (state.logRange === '7' ? dayOffset(-6) : state.logRange === '30' ? dayOffset(-29) : '');
   const to = state.logSubmission === 'submitted' ? state.logCheckDate : state.logTo || dateKey(), query = state.logQuery.trim().toLowerCase();
-  const submitted = new Set(allLogs.filter(l => l.date === state.logCheckDate).map(l => l.author));
+  const submitted = new Set(allLogs.filter(l => l.date === state.logCheckDate && !isDemoLog(l)).map(l => l.author));
   const missing = reportingMembers.filter(u => !submitted.has(u.id));
+  const nameMatches = u => !query || u.name.toLocaleLowerCase().includes(query);
+  const missingResults = missing.filter(nameMatches);
+  const shownMembers = reportingMembers.filter(u => state.logSubmission === 'all' || (state.logSubmission === 'submitted' ? submitted.has(u.id) : !submitted.has(u.id)));
   const logs = allLogs.filter(l => ids.has(l.author) && (!from || l.date >= from) && l.date <= to)
-    .filter(l => state.logSubmission === 'all' || (state.logSubmission === 'submitted' && l.date === state.logCheckDate))
+    .filter(l => state.logSubmission === 'all' || (state.logSubmission === 'submitted' && l.date === state.logCheckDate && !isDemoLog(l) && reportingMembers.some(u => u.id === l.author)))
     .filter(l => !query || `${l.title} ${l.content} ${userById(l.author)?.name || ''}`.toLowerCase().includes(query))
     .sort((a,b) => b.date.localeCompare(a.date) || String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  const displayedMembers = shownMembers.filter(u => state.logSubmission === 'missing' ? nameMatches(u) : state.logSubmission === 'submitted' ? logs.some(l => l.author === u.id) : true);
   const select = (name,label,items,value) => `<label>${label}<select name="${name}" data-log-select><option value="">全部${label}</option>${items.map(([id,text]) => `<option value="${esc(id)}" ${value === id ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select></label>`;
   const departments = [...new Set(members.map(u => u.department).filter(Boolean))];
   const roles = [...new Map(members.map(u => [u.role,u.roleName || u.role])).entries()];
@@ -364,9 +393,9 @@ function logsPage() {
   const incompleteCheck = state.logCheckDate < dayOffset(-6) && !state.logHistoryLoaded;
   const active = query || state.logDepartment || state.logRole || state.logAuthor || state.logFrom || state.logTo || state.logSubmission !== 'all';
   const title = isGlobal(user()) ? '公司工作日志' : isDeptManager(user()) ? '本部门工作日志' : isTeamLead(user()) ? '团队成员日志' : '我的日志';
-  const overview = supervisor ? `<section class="log-submission"><header><div><h2>提交概览</h2><p>${state.logCheckDate} · ${reportingMembers.length} 位成员</p></div><strong>${incompleteCheck ? '待加载' : `${reportingMembers.length - missing.length} / ${reportingMembers.length}`}</strong></header>${incompleteCheck ? '<p>请加载该日期的历史日志后查看提交情况。</p>' : `<div class="submission-members">${reportingMembers.map(u => `<button class="submission-person ${submitted.has(u.id) ? 'is-submitted' : ''}" data-log-member="${esc(u.id)}" title="筛选该成员日志">${esc(u.name)}<small>${submitted.has(u.id) ? '已提交' : '未提交'}</small></button>`).join('') || '<p>当前组织范围内没有成员</p>'}</div>`}</section>` : '';
-  return head(title, supervisor ? '按部门、职位、成员和日期筛选，查看每天的工作日志与提交情况。' : '记录今日完成、下一步计划，以及需要协助的问题。', button('写日志','new-log','','primary-button')) +
-    `<section class="log-filter" aria-busy="${loading}"><div class="segmented log-range" role="group" aria-label="日志时间范围">${[['7','近7天'],['30','近30天'],['all','全部']].map(([id,label]) => `<button class="segment ${state.logRange === id ? 'is-active' : ''}" aria-pressed="${state.logRange === id}" data-log-range="${id}">${label}</button>`).join('')}</div><form class="log-search log-discovery" data-form="log-filter"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" name="query" value="${esc(state.logQuery)}" placeholder="搜索姓名或工作内容（选填）" aria-label="搜索日志"></label><div class="log-filter-fields">${supervisor ? select('department','部门',departments.map(d => [d,d]),state.logDepartment) + select('role','职位',roles,state.logRole) + select('author','成员',members.filter(u => (!state.logDepartment || u.department === state.logDepartment) && (!state.logRole || u.role === state.logRole)).map(u => [u.id,u.name]),state.logAuthor) : ''}<label>开始日期<input name="from" type="date" data-log-select max="${dateKey()}" value="${state.logFrom}"></label><label>结束日期<input name="to" type="date" data-log-select max="${dateKey()}" value="${state.logTo}"></label>${supervisor ? `<label>统计日期<input name="checkDate" type="date" data-log-select max="${dateKey()}" value="${state.logCheckDate}"></label><label>提交状态<select name="submission" data-log-select>${[['all','全部日志'],['submitted','统计日已提交'],['missing','统计日未提交成员']].map(([id,label]) => `<option value="${id}" ${state.logSubmission === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}</div><button class="soft-button" type="submit">搜索</button></form><div class="log-filter-summary"><span role="status">${loading ? '正在加载历史日志…' : error || `共 ${logs.length} 篇日志`}</span>${error ? button('重新加载','retry-log-history','','text-button') : ''}${active ? button('清除筛选','clear-log-filters','','text-button') : ''}</div></section>${overview}<section class="log-results" aria-label="日志列表">${state.logSubmission === 'missing' ? (incompleteCheck ? empty('请先加载统计日期的日志') : missing.map(u => `<article class="log-card"><b>${esc(u.name)}</b><p>${esc(u.department)} · ${esc(u.roleName || u.role)}</p><span>${state.logCheckDate} 未提交</span></article>`).join('') || empty('该范围成员均已提交')) : logs.map(logCard).join('') || empty(loading ? '正在加载日志' : error ? '日志加载失败，请重试' : '这个范围内没有符合条件的日志')}</section>`;
+  const overview = supervisor ? `<section class="log-submission"><header><div><h2>提交概览</h2><p>统计日期 ${state.logCheckDate} · 应提交 ${reportingMembers.length} 人</p></div><strong>${incompleteCheck ? '待加载' : `${reportingMembers.length - missing.length} / ${reportingMembers.length}`}</strong></header>${incompleteCheck ? '<p>请加载该日期的历史日志后查看提交情况。</p>' : `<p class="submission-counts">已提交 ${reportingMembers.length - missing.length} 人 · 未提交 ${missing.length} 人</p><div class="submission-members">${displayedMembers.map(u => `<button class="submission-person ${submitted.has(u.id) ? 'is-submitted' : ''}" data-log-member="${esc(u.id)}" title="查看该成员在统计日的提交情况">${esc(u.name)}<small>${submitted.has(u.id) ? '已提交' : '未提交'}</small></button>`).join('') || '<p>当前筛选没有成员</p>'}</div>`}</section>` : '';
+  return head(title, supervisor ? (isGlobal(user()) ? '按部门、职位、成员和日期筛选，查看每天的工作日志与提交情况。' : '按职位、成员和日期筛选，查看本部门的工作日志与提交情况。') : '记录今日完成、下一步计划，以及需要协助的问题。', button('写日志','new-log','','primary-button')) +
+    `<section class="log-filter" aria-busy="${loading}"><div class="segmented log-range" role="group" aria-label="日志时间范围">${[['7','近7天'],['30','近30天'],['all','全部']].map(([id,label]) => `<button ${state.logSubmission !== 'all' ? 'disabled' : ''} class="segment ${state.logRange === id ? 'is-active' : ''}" aria-pressed="${state.logRange === id}" data-log-range="${id}">${label}</button>`).join('')}</div><form class="log-search log-discovery" data-form="log-filter"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" name="query" value="${esc(state.logQuery)}" placeholder="${state.logSubmission === 'missing' ? '搜索未提交成员姓名' : '搜索姓名或工作内容（选填）'}" aria-label="搜索日志"></label><div class="log-filter-fields">${supervisor ? (isGlobal(user()) ? select('department','部门',departments.map(d => [d,d]),state.logDepartment) : '') + select('role','职位',roles,state.logRole) + select('author','成员',members.filter(u => (!state.logDepartment || u.department === state.logDepartment) && (!state.logRole || u.role === state.logRole)).map(u => [u.id,u.name]),state.logAuthor) : ''}<label>日志开始日期<input name="from" type="date" data-log-select ${state.logSubmission !== 'all' ? 'disabled' : ''} max="${dateKey()}" value="${state.logFrom}"></label><label>日志结束日期<input name="to" type="date" data-log-select ${state.logSubmission !== 'all' ? 'disabled' : ''} max="${dateKey()}" value="${state.logTo}"></label>${supervisor ? `<label>统计日期<input name="checkDate" type="date" data-log-select max="${dateKey()}" value="${state.logCheckDate}"></label><label>提交状态<select name="submission" data-log-select>${[['all','全部日志'],['submitted','统计日已提交'],['missing','统计日未提交成员']].map(([id,label]) => `<option value="${id}" ${state.logSubmission === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}</div><button class="soft-button" type="submit">搜索</button></form><p class="log-date-help">${state.logSubmission === 'all' ? '日志日期范围用于查询正文；提交概览按统计日期的已保存日志计算。' : `仅统计 ${state.logCheckDate} 当天的提交情况，日志日期范围暂不参与筛选。`}</p><div class="log-filter-summary"><span role="status">${loading ? '正在加载历史日志…' : error || (incompleteCheck && state.logSubmission !== 'all' ? '提交情况待加载' : state.logSubmission === 'missing' ? `未提交 ${missingResults.length} 人` : state.logSubmission === 'submitted' ? `已提交 ${displayedMembers.length} 人 · ${logs.length} 篇日志` : `共 ${logs.length} 篇日志`)}</span>${error ? button('重新加载','retry-log-history','','text-button') : ''}${active ? button('清除筛选','clear-log-filters','','text-button') : ''}</div></section>${overview}${state.logAuthor && state.logSubmission !== 'all' ? button('查看该成员历史日志','log-member-history',state.logAuthor,'text-button') : ''}<section class="log-results" aria-label="日志列表">${state.logSubmission === 'missing' ? (incompleteCheck ? empty('请先加载统计日期的日志') : missingResults.map(u => `<article class="log-card"><b>${esc(u.name)}</b><p>${esc(u.department)} · ${esc(u.roleName || u.role)}</p><span>${state.logCheckDate} 未提交</span></article>`).join('') || empty(missing.length ? '没有匹配姓名的未提交成员' : '该范围成员均已提交')) : logs.map(logCard).join('') || empty(loading ? '正在加载日志' : error ? '日志加载失败，请重试' : '这个范围内没有符合条件的日志')}</section>`;
 }
 
 const messageKey = r => r.messageType === 'update' ? r.id : `${r.id}:${r.status}:${r.reviewedAt || r.createdAt}`;
@@ -465,11 +494,14 @@ function calendarAgenda(tasks, logs, todos = []) {
   const dayLogs = logs.filter(l => l.date === state.calendarDate);
   const dayTodos = todos.filter(t => t.date === state.calendarDate).sort((a, b) => Number(a.done) - Number(b.done));
   const date = new Date(`${state.calendarDate}T12:00:00`);
-  const event = t => `<button style="${taskColorStyle(t)}" class="timeline-item event--${t.priority} ${t.status === 'done' ? 'event--done' : ''}" data-action="task" data-id="${esc(t.id)}"><time datetime="${esc(t.dueAt)}">${esc(t.dueAt.slice(11,16))}</time><span class="timeline-copy"><b>${esc(t.title)}</b><small>${esc(names(t.owners))} · ${STATUS[t.status]}</small></span></button>`;
-  const spanning = dayTasks.filter(t=>taskStartAt(t).slice(0,10)!==t.dueAt.slice(0,10));
-  const hours = Array.from({length:24}, (_,hour) => `<div class="calendar-hour" data-hour="${hour}"><span class="hour-label">${String(hour).padStart(2,'0')}:00</span><div class="hour-events">${dayTasks.filter(t => !spanning.includes(t) && Number(t.dueAt.slice(11,13)) === hour).map(event).join('')}</div></div>`).join('');
-  const allDay = dayLogs.length || spanning.length || dayTodos.length ? `<div class="timeline-all-day"><span class="all-day-label">全天</span><div>${spanning.map(t=>`<button class="timeline-item event--${t.priority} event--span" style="${taskColorStyle(t)}" data-action="task" data-id="${esc(t.id)}"><span class="timeline-copy"><b>${esc(t.title)}</b><small>${taskPeriodText(t)}</small></span></button>`).join('')}${dayTodos.map(t=>`<button class="timeline-item event--todo ${t.done?'event--done':''}" data-action="todo-select" data-id="${state.calendarDate}"><span class="timeline-copy"><b>${esc(t.title)}</b><small>每日事项 · ${t.done?'已完成':'待完成'}</small></span></button>`).join('')}${dayLogs.map(l => `<button class="timeline-item event--log" data-action="log" data-id="${esc(l.id)}"><span class="timeline-copy"><b>${esc(l.title)}</b><small>工作日志</small></span></button>`).join('')}</div></div>` : '';
-  return `<section class="calendar-day-timeline calendar-hour-timeline" aria-label="${state.calendarDate} 任务与日志时间线"><header class="timeline-header"><h2>${date.getFullYear()}年${date.getMonth()+1}月${date.getDate()}日 − ${['周日','周一','周二','周三','周四','周五','周六'][date.getDay()]}</h2><p>${lunarDate(state.calendarDate).full}</p></header>${allDay}<div class="timeline-list">${hours}</div></section>`;
+  const layout = taskDayLayout(dayTasks,state.calendarDate);
+  const columns = Math.max(1,...layout.map(item => item.columns));
+  const time = minute => `${String(Math.floor(minute/60)).padStart(2,'0')}:${String(minute%60).padStart(2,'0')}`;
+  const event = ({task:t,start,end,lane,columns}) => `<div style="${taskColorStyle(t)};--start:${start};--duration:${Math.min(1440-start,Math.max(36,end-start))};--lane:${lane};--columns:${columns}" class="timed-task event--${t.priority} ${t.status === 'done' ? 'event--done' : ''}"><button style="${taskColorStyle(t)}" class="timeline-item event--${t.priority} ${t.status === 'done' ? 'event--done' : ''}" data-start-minute="${start}" data-action="task" data-id="${esc(t.id)}" aria-label="${esc(t.title)} ${time(start)} 至 ${time(end)} ${STATUS[t.status]}"><span class="timeline-copy"><b>${esc(t.title)}</b><small>${time(start)}–${time(end)} · ${STATUS[t.status]}</small><small>${esc(names(t.owners))}</small>${taskStartAt(t).slice(0,10) !== t.dueAt.slice(0,10) ? `<small>跨天 · ${taskPeriodText(t)}</small>` : ''}</span></button></div>`;
+  const hours = Array.from({length:24}, (_,hour) => `<div class="calendar-hour" data-hour="${hour}"><span class="hour-label">${String(hour).padStart(2,'0')}:00</span><div class="hour-events">${layout.filter(t => Math.floor(t.start/60) === hour).map(event).join('')}</div></div>`).join('');
+  const allDay = dayLogs.length || dayTodos.length ? `<div class="timeline-all-day"><span class="all-day-label">事项与日志</span><div>${dayTodos.map(t=>`<button class="timeline-item event--todo ${t.done?'event--done':''}" data-action="todo-select" data-id="${state.calendarDate}"><span class="timeline-copy"><b>${esc(t.title)}</b><small>每日事项 · ${t.done?'已完成':'待完成'}</small></span></button>`).join('')}${dayLogs.map(l => `<button class="timeline-item event--log" data-action="log" data-id="${esc(l.id)}"><span class="timeline-copy"><b>${esc(l.title)}</b><small>工作日志${isDemoLog(l) ? ' · 演示记录' : ''}</small></span></button>`).join('')}</div></div>` : '';
+  const historyNote = state.calendarDate < dayOffset(-6) && !state.logHistoryLoaded ? `<p class="calendar-history-note" role="status">${state.logLoading ? '正在加载历史日志…' : '历史日志尚未加载完整'} ${state.logError ? button('重试','retry-log-history','','text-button') : ''}</p>` : '';
+  return `<section class="calendar-day-timeline calendar-hour-timeline" aria-label="${state.calendarDate} 任务与日志时间线"><header class="timeline-header"><h2>${date.getFullYear()}年${date.getMonth()+1}月${date.getDate()}日 − ${['周日','周一','周二','周三','周四','周五','周六'][date.getDay()]}</h2><p>${lunarDate(state.calendarDate).full}</p></header>${historyNote}${allDay}${columns > 2 ? '<p class="calendar-history-note">同一时段有多项任务，可左右滑动查看。</p>' : ''}<div class="timeline-list timed-agenda" style="--agenda-width:${columns * 140 + 58}px">${hours}</div></section>`;
 }
 function calendarMonthRows(tasks, logs, dates, todoDays) {
   const weeks = [];
@@ -501,13 +533,12 @@ function calendarDateCell(day, showMonthLabel = false, todoDays) {
   const subLabel = markers.find(m => m.type === 'event' || m.type === 'lunar');
   const monthLabel = showMonthLabel ? getMonthLabel(day, state.calendarDate.slice(0,7)) : '';
   const isWeekend = [0,6].includes(new Date(`${day}T12:00:00`).getDay());
-  const hasTodos = Boolean(todoDays?.has(day));
-  return `<article class="calendar-day ${day===dateKey()?'is-today':''} ${day===state.calendarDate?'is-selected':''} ${isWeekend?'is-weekend':''} ${hasTodos?'has-todos':''}">
+  return `<article class="calendar-day ${day===dateKey()?'is-today':''} ${day===state.calendarDate?'is-selected':''} ${isWeekend?'is-weekend':''}">
     ${monthLabel ? `<div class="month-divider-label">${monthLabel}</div>` : ''}
     <button class="day-date" data-day="${day}" aria-pressed="${day===state.calendarDate}" ${day===dateKey()?'aria-current="date"':''} aria-label="查看 ${day} 日安排">
       <span class="day-number">${Number(day.slice(-2))}</span>
       <small class="day-sub ${restWork ? `day-sub--${restWork.type}` : ''}">
-        ${restWork ? `<em>${restWork.label}</em>` : ''}${subLabel ? esc(subLabel.label) : ''}${hasTodos ? '<i class="day-todo-dot" title="有每日事项" aria-hidden="true"></i>' : ''}
+        ${restWork ? `<em>${restWork.label}</em>` : ''}${subLabel ? esc(subLabel.label) : ''}
       </small>
     </button>
   </article>`;
@@ -518,7 +549,7 @@ function calendarSelectedAgenda(tasks, todos = []) {
   const dayTodos = todos.filter(t => t.date === state.calendarDate).sort((a, b) => Number(a.done) - Number(b.done));
   const doneCount = dayTodos.filter(t => t.done).length;
   const todoBlock = dayTodos.length ? `<div class="agenda-todos"><div class="agenda-todos-head"><b>每日事项</b><span>${doneCount}/${dayTodos.length} 已完成</span></div>${dayTodos.map(t=>`<button class="agenda-todo ${t.done?'is-done':''}" data-action="todo-select" data-id="${state.calendarDate}"><span class="todo-check">${t.done?'✓':''}</span><span>${esc(t.title)}</span></button>`).join('')}</div>` : '';
-  return `<section class="calendar-selected-agenda" aria-label="所选日期的任务"><header><div><h2>${shortDate(state.calendarDate)}的任务</h2><p>${list.length} 项安排 · 包含当天持续进行的任务</p></div><button data-mode="day">按小时查看 ›</button></header>${list.slice(0,3).map(t=>`<button class="calendar-selected-task" style="${taskColorStyle(t)}" data-action="task" data-id="${esc(t.id)}"><span class="selected-task-dot selected-task-dot--${t.priority}"></span><span><b>${esc(t.title)}</b><small>${taskPeriodText(t)}</small><small>${esc(names(t.owners))} · ${STATUS[t.status]}</small></span></button>`).join('')||'<p class="calendar-selected-empty">当天没有任务安排</p>'}${list.length > 3 ? button(`+${list.length-3}`, 'calendar-overflow', state.calendarDate, 'calendar-more') : ''}${todoBlock}</section>`;
+  return `<section class="calendar-selected-agenda" aria-label="所选日期的任务"><header><div><h2>${shortDate(state.calendarDate)}的任务</h2><p>${list.length} 项安排 · 包含当天持续进行的任务</p></div><button data-mode="week">查看当天安排 ›</button></header>${list.slice(0,3).map(t=>`<button class="calendar-selected-task" style="${taskColorStyle(t)}" data-action="task" data-id="${esc(t.id)}"><span class="selected-task-dot selected-task-dot--${t.priority}"></span><span><b>${esc(t.title)}</b><small>${taskPeriodText(t)}</small><small>${esc(names(t.owners))} · ${STATUS[t.status]}</small></span></button>`).join('')||'<p class="calendar-selected-empty">当天没有任务安排</p>'}${list.length > 3 ? button(`+${list.length-3}`, 'calendar-overflow', state.calendarDate, 'calendar-more') : ''}${todoBlock}</section>`;
 }
 function calendarPage() {
   const tasks = visibleTasks(state.db, user()), logs = visibleLogs(state.db, user());
@@ -539,13 +570,8 @@ function calendarPage() {
   const top = `<header class="ios-calendar-toolbar"><div class="calendar-title-group"><h1 class="ios-month-title"><button data-action="calendar-back" aria-label="${isMonth?'选择年月':'返回月视图'}">${month}</button></h1><span class="calendar-year">${date.getFullYear()}年</span></div><div class="calendar-head-actions"><button class="calendar-today-button" data-action="today">今天</button><button class="calendar-create-button" data-action="new-task" aria-label="新建任务">${calendarIcon('plus')}</button></div></header><div class="calendar-view-row">${viewSwitch('calendar')}</div>`;
   const dates = calendarDates(isMonth ? 'month' : 'week');
   const dateStrip = `<section class="calendar-panel calendar-panel--${isMonth?'month':'week'}" aria-label="${date.getFullYear()}年${date.getMonth()+1}月"><div class="calendar-week">${['日','一','二','三','四','五','六'].map(v=>`<span>${v}</span>`).join('')}</div><div class="calendar-grid" style="--calendar-rows:${dates.length/7}">${isMonth ? calendarMonthRows(tasks,logs,dates,todoDays) : dates.map(day=>calendarDateCell(day,false,todoDays)).join('')}</div></section>`;
-  const modes = `<div class="calendar-mode-tabs" role="group" aria-label="日历周期">${[['month','月'],['week','周'],['day','日']].map(([mode,label]) => `<button data-mode="${mode}" aria-pressed="${state.calendarMode === mode}">${label}</button>`).join('')}</div>`;
+  const modes = `<div class="calendar-mode-tabs" role="group" aria-label="日历周期">${[['month','月'],['week','周']].map(([mode,label]) => `<button data-mode="${mode}" aria-pressed="${state.calendarMode === mode}">${label}</button>`).join('')}</div>`;
   return `<section class="ios-calendar ios-calendar--${state.calendarMode} ${zoomClass}">${top}${modes}${metadataNote ? `<p class="calendar-metadata-note" role="status">${metadataNote}</p>` : ''}${isMonth?`<div class="calendar-month-content" id="calendar-scroll-area">${dateStrip}${calendarSelectedAgenda(tasks,todos)}</div>`:dateStrip+`<div class="calendar-agenda-scroll">${calendarAgenda(tasks,logs,todos)}</div>`}</section>`;
-}
-
-function announcementsDetail() {
-  const items = [...(state.db.announcements || [])].sort((a,b) => Number(b.pinned)-Number(a.pinned) || b.date.localeCompare(a.date));
-  open('公司公告', `<div class="highlight-dialog-list">${items.map(a => `<article class="announcement"><span class="announcement-tag">${a.pinned ? '置顶 · ' : ''}${esc(a.category)} · ${esc(a.date)}</span><h3>${esc(a.title)}</h3><p class="log-content">${esc(a.content)}</p></article>`).join('') || '<p class="detail-copy">暂无公司公告</p>'}</div>`);
 }
 
 function highlightsDetail(kind = 'company', id = '') {
@@ -567,7 +593,7 @@ function settingsRow(icon, title, detail, action) {
 function minePage() {
   const today = dateKey(), month = today.slice(0, 7);
   const myTasks = visibleTasks(state.db, user()).filter(t => t.owners.includes(user().id));
-  const myLogs = visibleLogs(state.db, user()).filter(l => l.author === user().id);
+  const myLogs = visibleLogs(state.db, user()).filter(l => l.author === user().id && !isDemoLog(l));
   const done = myTasks.filter(t => t.status === 'done' && t.completedAt?.slice(0, 7) === month).length;
   const monthLogs = myLogs.filter(l => l.date.slice(0, 7) === month && l.date <= today).length;
   const days = [0, -1, -2].map(offset => dayOffset(offset));
@@ -619,10 +645,17 @@ function render(preservePosition = false) {
   if (state.route === 'calendar' && state.taskView === 'calendar') {
     const years = new Set([state.calendarDate.slice(0,4), ...(state.calendarMode === 'month' ? [] : calendarDates('week').map(day=>day.slice(0,4)))]);
     for (const year of years) void loadCalendarMetadata(year);
+    if (state.calendarMode === 'week' && state.calendarDate < dayOffset(-6) && !state.logHistoryLoaded && !state.logLoading && !state.logError) queueMicrotask(loadLogHistory);
   }
-  const nav = [['dashboard','首页','⌂'],['logs','日志','✎'],['calendar','任务','▦'],['mine','我的','◯']];
+  const nav = [['dashboard','首页','⌂'],['logs','日志','✎'],['calendar','公司','▦'],['mine','我的','◯']];
   const pages = { dashboard, logs: logsPage, calendar: calendarPage, mine: minePage };
   root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">P</span><strong>潘多拉</strong></div><nav class="nav" aria-label="主导航">${nav.map(([route,label,icon]) => `<button class="nav-item ${state.route === route ? 'is-active' : ''}" data-route="${route}"><span class="nav-glyph">${icon}</span><span>${label}</span></button>`).join('')}</nav></aside><main class="main-content"><header class="topbar"><div class="mobile-brand"><span class="brand-mark">P</span><b>潘多拉</b></div><span class="version-label">工作台</span><button class="user-menu" data-route="mine" aria-label="进入我的页面">${person(user())}<span>›</span></button></header><div class="page-wrap ${state.route === 'dashboard' ? 'page-wrap--dashboard' : ''}">${pages[state.route]()}</div></main></div>`;
+  if (!preservePosition && state.calendarMode === 'week') {
+    const scroll = root.querySelector('.calendar-agenda-scroll');
+    const entries = [...root.querySelectorAll('[data-start-minute]')];
+    const earliest = entries.length ? Math.min(...entries.map(el => Number(el.dataset.startMinute))) : 480;
+    if (scroll) scroll.scrollTop = Math.max(0,earliest - 30);
+  }
   const monthContent = root.querySelector('.calendar-month-content');
   const selectedWeek = monthContent?.querySelector('.calendar-day.is-selected')?.closest('.calendar-week-row');
   if (!preservePosition && selectedWeek && monthContent.scrollHeight > monthContent.clientHeight) {
@@ -709,29 +742,46 @@ function logForm(id = '', selectedDate = '') {
   open(l ? `编辑${shortDate(l.date)}日志` : '写工作日志', `<form class="modal-form" data-form="log" data-id="${esc(l?.id || '')}">${dateField}<p class="form-tip">每人每天一篇，可补写或编辑最近三天 · 日报模板</p><label>今日完成<textarea name="content" maxlength="2800" rows="5" placeholder="记录完成的工作、结果和进展" required>${esc(sections.content)}</textarea></label><label>下一步计划<textarea name="plan" maxlength="2800" rows="3" placeholder="接下来准备推进什么？">${esc(sections.plan)}</textarea></label><label>问题与协助<textarea name="issues" maxlength="2800" rows="3" placeholder="有哪些阻塞，需要谁提供什么帮助？">${esc(sections.issues)}</textarea></label><p class="panel-note">三个部分合计最多 3000 字，含段落标题。</p><details><summary>自定义标题（可选）</summary><label>标题<input name="title" value="${esc(l?.title || '')}" maxlength="80" placeholder="不填则自动使用日志日期"></label></details><div class="modal-actions"><button class="primary-button" type="submit">保存日志</button></div></form>`);
 }
 
+async function loadLogComments(id) {
+  if (state.logComments[id]?.status === 'loading') return;
+  const token = state.token;
+  state.logComments[id] = {status:'loading',items:state.logComments[id]?.items || []};
+  try {
+    const items = await api(`/logs/${encodeURIComponent(id)}/comments`);
+    if (state.token !== token) return;
+    if (!Array.isArray(items)) throw new Error('评论数据无效');
+    state.logComments[id] = {status:'ready',items,checkedAt:Date.now()};
+  } catch {
+    if (state.token !== token) return;
+    state.logComments[id] = {status:'error',items:[]};
+  }
+  if (modal.open && modal.dataset.log === id) {
+    const draft = modal.querySelector('[name=content]')?.value || '';
+    await logDetail(id);
+    const field = modal.querySelector('[name=content]');
+    if (field) field.value = draft;
+  }
+}
+
 async function logDetail(id) {
   const l = visibleLogs(state.db,user()).find(v => v.id === id);
   if (!l) return notify('无权查看日志',true);
   const linked = l.taskId ? visibleTasks(state.db,user()).find(t => t.id === l.taskId) : null;
   const linkedBlock = linked ? `<div class="log-linked-task">${button(`关联任务 · ${esc(linked.title)}`, 'task', linked.id, 'soft-button')}</div>` : '';
   const canComment = canViewLog(user(), l.author) && l.author !== user().id;
-  // 异步加载评论
-  if (!state.logComments[id]) {
-    state.logComments[id] = 'loading';
-    api(`/logs/${id}/comments`).then(data => {
-      state.logComments[id] = data;
-      if (modal.open && modal.dataset.log === id) logDetail(id); else render();
-    }).catch(() => {
-      state.logComments[id] = [];
-      if (modal.open && modal.dataset.log === id) logDetail(id);
-    });
+  let entry = state.logComments[id];
+  if (!entry || (entry.status === 'ready' && Date.now() - entry.checkedAt > 30000)) {
+    void loadLogComments(id);
+    entry = state.logComments[id];
   }
-  const comments = state.logComments[id] === 'loading' ? [] : (state.logComments[id] || []);
-  const commentsHtml = comments.length ? comments.map(c => `<div class="comment-item"><strong>${esc(c.authorName)}</strong> · ${stamp(c.createdAt)}<p>${esc(c.content)}</p></div>`).join('') : '<p class="panel-note">暂无评论</p>';
+  const comments = entry?.items || [];
+  const commentsHtml = entry?.status === 'loading' ? '<p class="panel-note" role="status">正在加载评论…</p>'
+    : entry?.status === 'error' ? `<p class="panel-note" role="alert">评论加载失败，请重试 ${button('重试','retry-log-comments',id,'text-button')}</p>`
+    : comments.length ? comments.map(c => `<div class="comment-item"><strong>${esc(c.authorName)}</strong> · ${stamp(c.createdAt)}<p>${esc(c.content)}</p></div>`).join('') : '<p class="panel-note">暂无评论</p>';
   const commentForm = canComment ?
     `<form class="modal-form comment-form" data-form="log-comment" data-id="${esc(id)}"><label>发表评论<textarea name="content" maxlength="1000" rows="3" placeholder="对这篇日志的评论或批示…"></textarea></label><div class="modal-actions"><button class="primary-button" type="submit">发表评论</button></div></form>` :
     '<p class="panel-note">不能评论自己的日志，等待上级批示</p>';
-  open(l.title, `<p class="detail-copy">${esc(userById(l.author)?.name)} · ${l.date}</p><p class="detail-copy log-content">${esc(l.content)}</p>${linkedBlock}<div class="detail-actions">${canEditLog(user(),l) ? button('编辑这篇日志','edit-log',id,'primary-button') : '<span class="done-message">超过三天或他人日志只读</span>'}</div><div class="detail-history"><h3>修改记录（${l.versions?.length || 0}）</h3>${[...(l.versions || [])].reverse().map((v,i) => `<details class="version-item"><summary>历史版本 ${(l.versions?.length || 0)-i} · ${stamp(v.at)}</summary><b>${esc(v.title)}</b><p class="log-content">${esc(v.content)}</p></details>`).join('') || '<p class="panel-note">尚无修改记录</p>'}</div><div class="detail-history"><h3>评论（${comments.length}）</h3>${commentsHtml}${commentForm}</div>`);
+  open(l.title, `<p class="detail-copy">${esc(userById(l.author)?.name)} · ${l.date}</p><p class="detail-copy log-content">${esc(l.content)}</p>${linkedBlock}<div class="detail-actions">${canEditLog(user(),l) ? button('编辑这篇日志','edit-log',id,'primary-button') : '<span class="done-message">超过三天或他人日志只读</span>'}</div><div class="detail-history"><h3>修改记录（${l.versions?.length || 0}）</h3>${[...(l.versions || [])].reverse().map((v,i) => `<details class="version-item"><summary>历史版本 ${(l.versions?.length || 0)-i} · ${stamp(v.at)}</summary><b>${esc(v.title)}</b><p class="log-content">${esc(v.content)}</p></details>`).join('') || '<p class="panel-note">尚无修改记录</p>'}</div><div class="detail-history"><h3>评论${entry?.status === 'ready' ? `（${comments.length}）` : ''}</h3>${commentsHtml}${commentForm}</div>`);
   modal.dataset.log = id;
 }
 
@@ -770,19 +820,21 @@ async function action(name,id) {
   }
   if (name === 'todo-reschedule') {
     const todo = state.db.todos.find(t => t.id === id);
-    if (todo) open('事项改期', `<form class="modal-form" data-form="todo-move" data-id="${esc(id)}"><p>${esc(todo.title)}</p><label>移动到日期<input type="date" name="date" value="${todo.date}" required></label><button type="submit" class="primary-button">确认改期</button></form>`);
+    if (todo) open('事项改期', `<form class="modal-form" data-form="todo-move" data-id="${esc(id)}"><p>${esc(todo.title)}</p><label>移动到日期<input type="date" name="date" min="${dateKey()}" value="${todo.date < dateKey() ? dateKey() : todo.date}" required></label><button type="submit" class="primary-button">确认改期</button></form>`);
     return;
   }
-  if (name === 'calendar-modes') return open('日历视图', `<div class="calendar-mode-menu">${[['month','月视图','查看整月工作安排'],['week','周视图','选择本周日期，查看工作安排'],['day','日视图','按小时查看当天任务与日志']].map(([mode,title,detail])=>`<button data-mode="${mode}" aria-pressed="${state.calendarMode===mode}"><b>${title}</b><small>${detail}</small><span>${state.calendarMode===mode?'✓':''}</span></button>`).join('')}</div>`);
+  if (name === 'calendar-modes') return open('日历视图', `<div class="calendar-mode-menu">${[['month','月视图','查看整月工作安排'],['week','周视图','选择本周日期，查看当天工作安排']].map(([mode,title,detail])=>`<button data-mode="${mode}" aria-pressed="${state.calendarMode===mode}"><b>${title}</b><small>${detail}</small><span>${state.calendarMode===mode?'✓':''}</span></button>`).join('')}</div>`);
   if (name === 'calendar-back') {
     if (state.calendarMode !== 'month') {state.calendarMode='month';render();return;}
     const year = Number(state.calendarDate.slice(0,4));
     return open('选择年月', `<form class="modal-form" data-form="calendar-jump"><label>跳转到日期<input type="date" name="date" value="${state.calendarDate}" required></label><button class="primary-button" type="submit">查看日期</button></form><div class="calendar-year-grid">${Array.from({length:12},(_,i)=>`<button data-calendar-month="${year}-${String(i+1).padStart(2,'0')}-01">${i+1}月</button>`).join('')}</div>`);
   }
   if (name === 'calendar-search') {state.taskView='list';render();root.querySelector('[aria-label="搜索任务"]')?.focus();return;}
-  if (name === 'all-tasks') {state.route='calendar';state.taskView='list';state.filter='all';state.taskQuery='';state.taskPriority='';state.taskScope='';render();window.scrollTo(0,0);return;}
-  if (name === 'todo-calendar') return openTodoCalendar(state.todoDate);
-  if (name === 'todo-select') return openTodoDay(id);
+  if (name === 'all-tasks') {state.route='calendar';state.taskView='list';state.filter='unfinished';state.taskQuery='';state.taskPriority='';state.taskScope='mine';render();window.scrollTo(0,0);return;}
+  if (name === 'todo-calendar') { state.todoMode = state.todoMode === 'month' ? 'week' : 'month'; render(true); return; }
+  if (name === 'todo-overflow') return openTodoDay(id);
+  if (name === 'todo-today') { state.todoDate = dateKey(); render(true); return; }
+  if (name === 'todo-select') { state.todoDate = id; if (state.route !== 'dashboard') state.route = 'dashboard'; render(true); return; }
   if (name === 'todo-month-prev') return shiftTodoMonth(-1);
   if (name === 'todo-month-next') return shiftTodoMonth(1);
   if (name === 'todo-toggle') return todoAction(`/todos/${id}/toggle`, '事项状态已更新');
@@ -795,7 +847,6 @@ async function action(name,id) {
   if (name === 'log') return logDetail(id);
   if (name === 'request') { const r = visibleRequests(state.db,user()).find(r => r.id === id); if (r) markMessagesRead([r]); render(); return requestDetail(id); }
   if (name === 'company-highlights') return highlightsDetail();
-  if (name === 'announcements-open') return announcementsDetail();
   if (name === 'dispatch-highlights') return highlightsDetail('dispatch');
   if (name === 'personal-highlights') return highlightsDetail('personal');
   if (name === 'highlight') {
@@ -816,6 +867,8 @@ async function action(name,id) {
   if (name === 'logout') return logout();
   if (name === 'clear-log-filters') { resetLogFilters(); render(); return; }
   if (name === 'retry-log-history') return loadLogHistory();
+  if (name === 'retry-log-comments') { delete state.logComments[id]; return logDetail(id); }
+  if (name === 'log-member-history') { state.logAuthor = id; state.logSubmission = 'all'; state.logFrom = ''; state.logTo = ''; state.logRange = 'all'; render(); return loadLogHistory(); }
   if (name === 'route-tasks') { state.route = 'calendar'; state.taskView = 'list'; render(); window.scrollTo(0,0); return; }
   if (name === 'pin') return save(async () => { await api(`/tasks/${id}/pin`, { method: 'POST' }); },'个人重点已更新');
   if (name === 'complete') return open('确认完成任务', `<p class="detail-copy">此操作会将整项任务标记完成，其他负责人也会看到已完成状态，无需审核。</p><div class="detail-actions confirm-actions">${button('确认完成','confirm-complete',id,'primary-button')}${button('返回任务','task',id)}</div>`);
@@ -833,38 +886,93 @@ async function moveTodo(id, date) {
   if (movingTodo) return false;
   const todo = state.db.todos?.find(t => t.id === id);
   if (!todo || todo.date === date) return false;
+  if (!isValidDate(date) || date < dateKey()) { notify('只能移到今天及以后的日期',true); return false; }
   movingTodo = true;
+  const token = state.token;
   try {
-    await api(`/todos/${encodeURIComponent(id)}/date`, {method:'PUT',body:JSON.stringify({date})});
-    todo.date = date; state.todoDate = date;
-    render();
-    refreshTodoDialog();
-    notify('事项已移动'); return true;
+    const saved = await api(`/todos/${encodeURIComponent(id)}/date`, {method:'PUT',body:JSON.stringify({date})});
+    if (state.token !== token) return false;
+    Object.assign(todo,saved);
+    render(true); refreshTodoDialog();
+    notify(`已移至 ${shortDate(date)}`,false,saved.moveToken ? async () => {
+      try {
+        const restored = await api(`/todos/${encodeURIComponent(id)}/date/undo`,{method:'POST',body:JSON.stringify({token:saved.moveToken})});
+        if (state.token !== token) return;
+        const current = state.db.todos?.find(t => t.id === id);
+        if (current) Object.assign(current,restored);
+        render(true); refreshTodoDialog(); notify('已撤销改期');
+      } catch (error) { notify(error.message,true); }
+    } : null);
+    return true;
   } catch (error) { notify(error.message,true); return false; }
   finally { movingTodo = false; }
 }
-let draggedTodo = '', touchDrag = null;
-const clearDropTarget = () => document.querySelectorAll('.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
+let draggedTodo = '', touchDrag = null, dragContext = null;
+const clearDropTarget = () => document.querySelectorAll('.is-drop-target,.is-invalid-drop').forEach(el => el.classList.remove('is-drop-target','is-invalid-drop'));
+function beginTodoDrag(item,x,y,touch = false) {
+  const source = state.db.todos?.find(t => t.id === item.dataset.todoDrag);
+  if (!source || movingTodo || dragContext) return false;
+  dragContext = {sheet:modal.open && modal.dataset.todo === 'overflow',scroll:modal.scrollTop,listScroll:modal.querySelector('.todo-list')?.scrollTop || 0,x:window.scrollX,y:window.scrollY};
+  const ghost = document.createElement('div'); ghost.className = 'todo-drag-ghost'; ghost.textContent = source.title;
+  if (touch) { ghost.style.left = `${x}px`; ghost.style.top = `${y}px`; document.body.append(ghost); }
+  dragContext.ghost = ghost;
+  if (dragContext.sheet) modal.close();
+  document.body.classList.add('todo-dragging');
+  document.body.classList.toggle('todo-touch-drag',touch);
+  root.querySelector('.todo-calendar')?.insertAdjacentHTML('beforeend','<p class="todo-drop-feedback" role="status">拖到目标日期，松手改期</p>');
+  return true;
+}
+function highlightTodoTarget(cell) {
+  clearDropTarget();
+  const status = root.querySelector('.todo-drop-feedback');
+  if (!cell) { if(status) status.textContent = '拖到目标日期，松手改期'; return; }
+  const invalid = cell.dataset.todoDrop < dateKey();
+  cell.classList.add(invalid ? 'is-invalid-drop' : 'is-drop-target');
+  if(status) status.textContent = invalid ? '不能移至过去日期' : `移至 ${shortDate(cell.dataset.todoDrop)}`;
+}
+async function endTodoDrag(cell,cancelled = false) {
+  if (!dragContext) return;
+  const context = dragContext, id = draggedTodo;
+  dragContext = null; draggedTodo = '';
+  clearDropTarget(); document.body.classList.remove('todo-dragging','todo-touch-drag'); context.ghost?.remove();
+  root.querySelector('.todo-drop-feedback')?.remove();
+  window.scrollTo(context.x,context.y);
+  suppressTodoClickUntil = Date.now()+650;
+  const moved = !cancelled && cell && cell.dataset.todoDrop >= dateKey() ? await moveTodo(id,cell.dataset.todoDrop) : false;
+  if (!cancelled && cell && cell.dataset.todoDrop < dateKey()) notify('不能移至过去日期',true);
+  if (context.sheet && !moved) {
+    openTodoDay(); modal.scrollTop = context.scroll;
+    const list = modal.querySelector('.todo-list'); if(list) list.scrollTop = context.listScroll;
+  }
+  if (!moved && deferredRender && !modal.open) refreshView();
+}
 document.addEventListener('dragstart', e => {
   const item = e.target.closest('[data-todo-drag]'); if (!item) return;
   draggedTodo = item.dataset.todoDrag;
   e.dataTransfer.setData('text/plain',draggedTodo); e.dataTransfer.effectAllowed = 'move';
+  // Keep the native source attached while the browser captures its drag image.
+  queueMicrotask(() => { if (draggedTodo) beginTodoDrag(item,e.clientX,e.clientY); });
 });
 document.addEventListener('dragover', e => {
-  const cell = e.target.closest('[data-todo-drop]'); if (!cell || !draggedTodo) return;
-  e.preventDefault(); clearDropTarget(); cell.classList.add('is-drop-target');
+  const cell = e.target.closest('[data-todo-drop]'); if (!draggedTodo) return;
+  e.preventDefault(); highlightTodoTarget(cell);
+  if(e.dataTransfer) e.dataTransfer.dropEffect = cell && cell.dataset.todoDrop >= dateKey() ? 'move' : 'none';
 });
 document.addEventListener('drop', e => {
-  const cell = e.target.closest('[data-todo-drop]'); if (!cell || !draggedTodo) return;
-  e.preventDefault(); const id = draggedTodo; draggedTodo = ''; clearDropTarget();
-  suppressTodoClickUntil = Date.now()+500; moveTodo(id,cell.dataset.todoDrop);
+  if (!draggedTodo) return;
+  e.preventDefault(); void endTodoDrag(e.target.closest('[data-todo-drop]'));
 });
-document.addEventListener('dragend', () => { draggedTodo = ''; clearDropTarget(); });
+document.addEventListener('dragend', () => { if(dragContext) void endTodoDrag(null,true); draggedTodo = ''; });
 document.addEventListener('pointerdown', e => {
   const item = e.target.closest('[data-todo-drag]');
-  if (!item || e.pointerType !== 'touch') return;
+  if (!item || e.pointerType !== 'touch' || movingTodo) return;
   touchDrag = {id:item.dataset.todoDrag,x:e.clientX,y:e.clientY,active:false};
-  touchDrag.timer = setTimeout(() => { if (touchDrag) { touchDrag.active = true; item.classList.add('is-dragging'); navigator.vibrate?.(25); } },350);
+  touchDrag.timer = setTimeout(() => {
+    if (!touchDrag) return;
+    touchDrag.active = true; draggedTodo = touchDrag.id;
+    if (!beginTodoDrag(item,touchDrag.x,touchDrag.y,true)) { touchDrag = null; return; }
+    navigator.vibrate?.(25);
+  },350);
 });
 document.addEventListener('touchmove', e => {
   if (!touchDrag || !e.touches[0]) return;
@@ -873,24 +981,26 @@ document.addEventListener('touchmove', e => {
     if (Math.hypot(touch.clientX-touchDrag.x,touch.clientY-touchDrag.y)>10) { clearTimeout(touchDrag.timer); touchDrag=null; }
     return;
   }
-  e.preventDefault(); clearDropTarget();
-  document.elementFromPoint(touch.clientX,touch.clientY)?.closest('[data-todo-drop]')?.classList.add('is-drop-target');
-}, {passive:false});
+  e.preventDefault();
+  if (dragContext?.ghost) { dragContext.ghost.style.left = `${touch.clientX}px`; dragContext.ghost.style.top = `${touch.clientY}px`; }
+  highlightTodoTarget(document.elementFromPoint(touch.clientX,touch.clientY)?.closest('[data-todo-drop]'));
+},{passive:false});
 function finishTouchDrag(e) {
   if (!touchDrag) return;
   clearTimeout(touchDrag.timer);
   const drag = touchDrag; touchDrag = null;
-  document.querySelectorAll('.is-dragging').forEach(el => el.classList.remove('is-dragging'));
-  const cell = document.querySelector('.is-drop-target'); clearDropTarget();
-  if (drag.active) { suppressTodoClickUntil=Date.now()+600; if (cell && e.type !== 'touchcancel') moveTodo(drag.id,cell.dataset.todoDrop); }
+  if (drag.active) void endTodoDrag(document.querySelector('.is-drop-target,.is-invalid-drop'),e.type === 'touchcancel');
 }
 document.addEventListener('touchend',finishTouchDrag);
 document.addEventListener('touchcancel',finishTouchDrag);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && dragContext) { e.preventDefault(); clearTimeout(touchDrag?.timer); touchDrag = null; void endTodoDrag(null,true); }
+});
 document.addEventListener('click', async e => {
-  if (Date.now() < suppressTodoClickUntil && e.target.closest('button[data-todo-drag]')) { e.preventDefault(); return; }
+  if (Date.now() < suppressTodoClickUntil && e.target.closest('[data-todo-drag],[data-todo-drop]')) { e.preventDefault(); return; }
   const el = e.target.closest('button'); if (!el) return;
   if (el.dataset.messageFilter) { state.messageFilter = el.dataset.messageFilter; openMessages(); return; }
-  if (el.dataset.logMember) { state.logAuthor = el.dataset.logMember; state.logSubmission = 'all'; render(); return; }
+  if (el.dataset.logMember) { state.logAuthor = el.dataset.logMember; if (state.logSubmission === 'all') state.logSubmission = visibleLogs(state.db,user()).some(l => l.author === state.logAuthor && l.date === state.logCheckDate && !isDemoLog(l)) ? 'submitted' : 'missing'; render(); return; }
   if (el.hasAttribute('data-close')) return close();
   if (el.dataset.route) {
     state.route = el.dataset.route;
@@ -931,23 +1041,17 @@ function readAvatarFile(file) {
 }
 
 // 任务搜索：输入一两个字就即时过滤下方列表，不必再点「筛选」。
-document.addEventListener('input', e => {
+function updateTaskSearch(e) {
   const input = e.target;
-  if (!input.matches || !input.matches('[data-task-query]')) return;
-  const query = input.value.trim().toLowerCase();
-  let shown = 0;
-  root.querySelectorAll('.task-table tbody tr').forEach(row => {
-    const hit = !query || row.textContent.toLowerCase().includes(query);
-    row.hidden = !hit;
-    if (hit) shown += 1;
-  });
-  const count = root.querySelector('.filter-count');
-  if (count) count.textContent = String(shown);
-  const panel = root.querySelector('.task-table-panel');
-  if (panel) panel.hidden = shown === 0;
-  const emptyHint = root.querySelector('.task-live-empty');
-  if (emptyHint) emptyHint.hidden = shown > 0;
-});
+  if (e.isComposing || !input.matches?.('[data-task-query]')) return;
+  state.taskQuery = input.value;
+  const start = input.selectionStart, end = input.selectionEnd;
+  render(true);
+  const field = root.querySelector('[data-task-query]');
+  if (field) { field.focus({preventScroll:true}); field.setSelectionRange(start,end); }
+}
+document.addEventListener('input', updateTaskSearch);
+document.addEventListener('compositionend', updateTaskSearch);
 
 document.addEventListener('change', async e => {
   if (e.target.matches('[data-log-select]')) {
@@ -970,7 +1074,7 @@ document.addEventListener('change', async e => {
   if (e.target.matches('[data-calendar-date]')) {
     if (!e.target.value) return;
     state.calendarDate = e.target.value;
-    state.calendarMode = 'day';
+    state.calendarMode = 'week';
     state.taskView = 'calendar';
     render();
     return;
@@ -986,7 +1090,7 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('submit', async e => {
-  if(e.target.dataset.form === 'calendar-jump') {e.preventDefault();state.calendarDate=new FormData(e.target).get('date');state.calendarMode='day';close();render();return;}
+  if(e.target.dataset.form === 'calendar-jump') {e.preventDefault();state.calendarDate=new FormData(e.target).get('date');state.calendarMode='week';close();render();return;}
   e.preventDefault(); const form=e.target, fd=new FormData(form), v=Object.fromEntries(fd.entries()), id=form.dataset.id;
   if (form.dataset.form === 'log-filter') { readLogFilters(form); render(); if (state.logRange !== '7' || state.logCheckDate < dayOffset(-6)) await loadLogHistory(); return; }
   if (form.dataset.form === 'task-filter') { state.taskQuery = v.query || ''; state.taskPriority = v.priority || ''; state.taskScope = v.scope || ''; render(); return; }
@@ -1038,14 +1142,14 @@ document.addEventListener('submit', async e => {
     await save(async () => { await api('/logs', { method: 'POST', body: JSON.stringify({ logId: id || undefined, values: v }) }); },`${shortDate(v.date)}日志已保存`);
   }
   if (form.dataset.form === 'todo-move') {
-    if (await moveTodo(id,v.date)) openTodoCalendar(v.date); return;
+    if (await moveTodo(id,v.date)) { close(); render(true); } return;
   }
   if (form.dataset.form === 'todo') {
     const title = v.title?.trim();
     if (!title) { notify('请填写事项内容', true); return; }
     try {
-      await api('/todos', { method: 'POST', body: JSON.stringify({ date: state.todoDate, title }) });
-      await loadWorkspace(); render(); refreshTodoDialog(); notify('事项已添加');
+      await api('/todos', { method: 'POST', body: JSON.stringify({ date: form.dataset.date, title }) });
+      await loadWorkspace(); state.todoDate = form.dataset.date; deferredTodoDate = ''; render(); refreshTodoDialog(); notify('事项已添加');
     } catch (err) { notify(err.message, true); }
     return;
   }
@@ -1054,9 +1158,8 @@ document.addEventListener('submit', async e => {
       const content = v.content?.trim();
       if (!content) throw new Error('评论内容不能为空');
       await api(`/logs/${id}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
-      // 清除缓存，重新加载评论
-      state.logComments[id] = 'loading';
-      api(`/logs/${id}/comments`).then(data => { state.logComments[id] = data; render(); });
+      // Fetch fresh comments on the next open.
+      delete state.logComments[id];
       close(); notify('评论已发表');
     } catch (err) { notify(err.message, true); }
     return;
@@ -1098,7 +1201,7 @@ window.addEventListener('pageshow',refreshWorkspace);
 window.addEventListener('online',refreshWorkspace);
 root.addEventListener('focusout', () => { if (deferredRender) queueMicrotask(refreshView); });
 modal.addEventListener('close', () => {
-  if (modal.open) return;
+  if (modal.open || dragContext) return;
   if (deferredTodoDate && state.todoDate === deferredTodoDate) state.todoDate = dateKey();
   deferredTodoDate = '';
   checkSystemDate();

@@ -47,7 +47,7 @@ try {
   await page.locator('[name=password]').fill('fixture-password');
   await page.getByRole('button',{name:'登录',exact:true}).click();
   await page.locator('.dashboard-page').waitFor();
-  assert.match((await page.locator('.nav [data-route=calendar]').innerText()),/任务/);
+  assert.match((await page.locator('.nav [data-route=calendar]').innerText()),/公司/);
   assert.deepEqual(await page.locator('.dashboard-tile').first().locator('.tile-row-main b').allTextContents(),['第一项公司重点','第二项公司重点']);
   assert.equal(await page.getByText('他人的重点',{exact:true}).count(),0);
   assert.equal(await page.getByText('已停用的重点',{exact:true}).count(),0);
@@ -66,7 +66,7 @@ try {
   await page.locator('.overflow-task[data-id=t10]').click();
   assert.equal(await page.locator('#modal-title').innerText(),'日程事项 10');await close();
   await page.screenshot({path:path.join(output,'calendar-iphone-month.png'),fullPage:true});
-  await mode('day');
+  await mode('week');
   assert.equal(await page.locator('.calendar-hour').count(),24);
   assert.equal(await page.locator('[data-hour="8"] .timeline-item').count(),2);
   assert.equal(await page.locator('.timeline-item').count(),10);
@@ -98,7 +98,7 @@ try {
   await page.locator('[data-task-view=calendar]').click();
   for(const size of [{width:360,height:640},{width:390,height:844},{width:412,height:844},{width:1280,height:900}]) {
     await page.setViewportSize(size);
-    for(const value of ['month','week','day']) {
+    for(const value of ['month','week']) {
       await mode(value);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${size.width} ${value}`);
       assert.ok(await page.locator('.calendar-view-row').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight));
@@ -107,7 +107,7 @@ try {
   }
   await jump('2026-08-31');await mode('month');
   assert.equal(await page.locator('.calendar-day').count(),42,'six-row month is complete');
-  await page.locator('[data-day="2026-08-31"]').click();await mode('day');
+  await page.locator('[data-day="2026-08-31"]').click();await mode('week');
   assert.match(await page.locator('.timeline-header').innerText(),/2026年8月31日/);
   tasks.push({id:'week-long',title:'持续一周的客户方案',startAt:'2026-10-26T09:00',dueAt:'2026-11-01T18:00',owners:['manager'],creator:'manager',priority:'medium',status:'doing',history:[]});
   tasks.push({id:'overlap-span',title:'同步准备评审材料',startAt:'2026-10-28T10:00',dueAt:'2026-10-30T17:00',owners:['manager'],creator:'manager',priority:'low',status:'todo',history:[]});
@@ -129,8 +129,8 @@ try {
   assert.equal(await page.locator('.calendar-selected-task[data-id=week-long]').count(),0);
   await page.locator('[data-day="2026-10-28"]').click();
   await page.screenshot({path:path.join(output,'calendar-light-spanning-month.png'),fullPage:true});
-  await mode('day');
-  assert.equal(await page.locator('.timeline-all-day [data-id=week-long]').count(),1);
+  await mode('week');
+  assert.equal(await page.locator('.timed-agenda [data-id=week-long]').count(),1);
   await jump('2026-11-01');await mode('month');
   assert.equal(await page.locator('.month-task-span[data-id=week-long]').getAttribute('data-span-end'),'2026-11-01');
   assert.equal(await page.locator('.calendar-selected-task[data-id=week-long]').count(),1);

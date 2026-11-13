@@ -92,18 +92,21 @@ try {
       assert.equal(await page.locator('#modal').evaluate(el => el.open),false,'swipe does not open an item');
     }
     await page.screenshot({path:`output/playwright/mobile-home-${width}.png`,fullPage:true});
+    if (await page.locator('.todo-calendar--week').count()) await page.locator('[data-action=todo-calendar]').tap();
     await page.locator(`[data-todo-drop="${today}"] .calendar-more`).tap();
     assert.equal(await page.locator('#modal .todo-calendar').count(),0);
     assert.equal(await page.locator('#modal .todo-item').count(),6);
     await checkDialog(['.modal-head','.todo-day-details'],false);
-    assert.ok((await page.locator('#modal .todo-day-head').boundingBox()).y<300,'+N opens the day list immediately');
+    const sheetTop=(await page.locator('#modal').boundingBox()).y;
+    assert.ok((await page.locator('#modal .todo-day-head').boundingBox()).y<sheetTop+150,'+N opens directly to the day list in the centered dialog');
     await page.locator('#modal [data-action=todo-toggle]').first().tap();
     await page.waitForFunction(() => document.querySelector('#modal .todo-item.is-done'));
-    assert.equal(await page.locator('#modal').getAttribute('data-todo'),'day');
+    assert.equal(await page.locator('#modal').getAttribute('data-todo'),'overflow');
     await page.screenshot({path:`output/playwright/mobile-todo-day-${width}.png`}); await close();
     await page.locator('[data-action=todo-calendar]').tap();
-    await checkDialog(['.modal-head','.todo-calendar']);
-    await page.screenshot({path:`output/playwright/mobile-todo-month-${width}.png`}); await close();
+    assert.equal(await page.locator('.todo-calendar--week .todo-month-cell').count(),7);
+    await page.locator('[data-action=todo-calendar]').tap();
+    await page.screenshot({path:`output/playwright/mobile-todo-month-${width}.png`});
     await page.locator('[data-action=company-highlights]').tap();
     await checkDialog(['.modal-head','.highlight-dialog-list']);
     await page.screenshot({path:`output/playwright/mobile-events-${width}.png`}); await close();
@@ -112,7 +115,7 @@ try {
     await checkDialog(['.modal-head','.detail-copy','.detail-owner','.detail-actions','.detail-history']);
     await page.screenshot({path:`output/playwright/mobile-task-${width}.png`}); await close();
     await page.locator('[data-action=all-tasks]').tap();
-    assert.equal(await page.locator('.task-table tbody tr').count(),14);
+    assert.equal(await page.locator('.task-table tbody tr').count(),13);
     const gutters = await page.locator('.company-panel').evaluate(el => ({left:getComputedStyle(el).paddingLeft,right:getComputedStyle(el).paddingRight}));
     assert.deepEqual(gutters,{left:'20px',right:'20px'});
     await page.locator('.nav [data-route=logs]').tap();
@@ -126,17 +129,21 @@ try {
     assert.equal(await page.locator('#modal .overflow-task').count(),14);
     await checkDialog(['.modal-head','.overflow-task-list']);
     await page.screenshot({path:`output/playwright/mobile-calendar-overflow-${width}.png`}); await close();
-    for (const mode of ['week','day']) {
+    for (const mode of ['week']) {
       await page.locator(`.calendar-mode-tabs [data-mode=${mode}]`).tap();
       assert.equal(await page.locator('.calendar-agenda-scroll [data-action=task]').count(),14);
-      const first = page.locator('.timeline-all-day [data-id=task0]');
-      assert.ok((await first.boundingBox()).width>width/2,'spanning title uses the full card width');
+      const first = page.locator('.timed-agenda [data-id=task0]');
+      assert.ok((await first.boundingBox()).width>=130,'dense overlapping tasks keep readable lane widths');
       assert.ok(await page.locator('.calendar-agenda-scroll').evaluate(el=>el.clientHeight)>100);
       const last = page.locator('.hour-events [data-id=task13]');
       await last.scrollIntoViewIfNeeded();
-      const rect = await last.boundingBox();
-      assert.ok(rect.y>=0 && rect.y+rect.height<= (await page.viewportSize()).height-65,'hourly tasks remain reachable below all-day items');
+      await page.locator('.calendar-agenda-scroll').evaluate(el=>{el.scrollTop+=180;});
+      const label=await last.boundingBox(),viewport=await page.locator('.calendar-agenda-scroll').boundingBox();
+      assert.ok(label.y>=viewport.y && label.y<viewport.y+viewport.height,'long task labels remain visible while scrolling through their duration');
       await page.screenshot({path:`output/playwright/mobile-calendar-${mode}-${width}.png`});
+      await last.tap();
+      assert.equal(await page.locator('#modal-title').innerText(),'交付任务 14','timed work remains reachable after scrolling');
+      await close();
     }
     await page.locator('.calendar-mode-tabs [data-mode=month]').tap();
     await page.evaluate(() => {

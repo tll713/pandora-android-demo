@@ -5,6 +5,7 @@
 )
 
 $ErrorActionPreference = 'Stop'
+$launcherPath = $PSCommandPath
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runDirectory = Join-Path $projectRoot 'tmp\run'
 $stateFile = Join-Path $runDirectory 'processes.json'
@@ -78,15 +79,92 @@ function Find-Node {
     return $command.Source
 }
 
+function Save-LocalConfiguration($Values) {
+    $lines = if (Test-Path -LiteralPath $localConfig) { @(Get-Content -LiteralPath $localConfig -Encoding UTF8) } else { @('# Local development configuration. Do not commit this file.') }
+    $remaining = @{} + $Values
+    $result = @($lines | ForEach-Object {
+        if ($_ -match '^\s*([A-Z_]+)=.*$' -and $Values.ContainsKey($Matches[1])) {
+            $key = $Matches[1]
+            "$key=$($Values[$key])"
+            $remaining.Remove($key)
+        } else { $_ }
+    })
+    foreach ($key in ($remaining.Keys | Sort-Object)) { $result += "$key=$($remaining[$key])" }
+    [IO.File]::WriteAllLines($localConfig, [string[]]$result, (New-Object Text.UTF8Encoding $false))
+}
+
+function Initialize-LocalConfiguration {
+    $missingPassword = -not $env:PANDORA_DB_PASSWORD -and -not $env:SPRING_DATASOURCE_PASSWORD
+    if ($Check -and ($missingPassword -or -not $env:PANDORA_JWT_SECRET)) {
+        throw '后端尚未配置。请双击 start.cmd，按提示填写数据库账号和密码；脚本会自动生成并保存 JWT 密钥。也可手动填写根目录 .env。'
+    }
+    if ($env:PANDORA_JWT_SECRET -and [Text.Encoding]::UTF8.GetByteCount($env:PANDORA_JWT_SECRET) -lt 32) {
+        throw '.env 或环境变量中的 PANDORA_JWT_SECRET 不足 32 字节，请替换为足够长的随机密钥，或清空后重新运行 start.cmd 自动生成。'
+    }
+    $updates = @{}
+    if ($missingPassword) {
+        Write-Host '首次启动后端：配置现有 MySQL 账号，输入内容只保存在本机 .env。' -ForegroundColor Yellow
+        $databaseUser = if ($env:SPRING_DATASOURCE_USERNAME) { $env:SPRING_DATASOURCE_USERNAME } elseif ($env:PANDORA_DB_USERNAME) { $env:PANDORA_DB_USERNAME } else { 'pandora_app' }
+        $answer = Read-Host "MySQL 用户名（回车使用 $databaseUser）"
+        if ($answer.Trim()) { $databaseUser = $answer.Trim() }
+        $securePassword = Read-Host 'MySQL 密码（输入时不显示）' -AsSecureString
+        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+        try { $databasePassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
+        finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer); $securePassword.Dispose() }
+        if (-not $databasePassword) { throw '未填写数据库密码，已取消启动。请使用现有 MySQL 账号的真实密码。' }
+        $env:PANDORA_DB_USERNAME = $databaseUser
+        $env:PANDORA_DB_PASSWORD = $databasePassword
+        $updates['PANDORA_DB_USERNAME'] = $databaseUser
+        $updates['PANDORA_DB_PASSWORD'] = $databasePassword
+    }
+    if (-not $env:PANDORA_JWT_SECRET) {
+        $bytes = New-Object byte[] 32
+        $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $generator.GetBytes($bytes) } finally { $generator.Dispose() }
+        $env:PANDORA_JWT_SECRET = [Convert]::ToBase64String($bytes)
+        $updates['PANDORA_JWT_SECRET'] = $env:PANDORA_JWT_SECRET
+    }
+    if ($updates.Count) {
+        if (-not (Test-Path -LiteralPath $localConfig)) { $updates['SPRING_PROFILES_ACTIVE'] = $env:SPRING_PROFILES_ACTIVE }
+        Save-LocalConfiguration $updates
+        Write-Host '本机配置已保存到 .env，之后启动无需重复填写。' -ForegroundColor Green
+    }
+}
+
+function Find-ProjectWorkers {
+    # Recover script-owned workers if the ignored state file was removed.
+    # Match this exact script path and service argument before recording a PID.
+    try { $workers = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction Stop) }
+    catch { return @() }
+    $pattern = '(?i)(?:^|\s)-File\s+"?' + [regex]::Escape($launcherPath) + '"?(?=\s|$).*?\s-Service\s+(Backend|Frontend)(?=\s|$)'
+    foreach ($worker in $workers) {
+        if ($worker.CommandLine -match $pattern) {
+            $name = $Matches[1]
+            $process = Get-Process -Id $worker.ProcessId -ErrorAction SilentlyContinue
+            if ($process) { [pscustomobject]@{ service = $name; pid = $process.Id; started = $process.StartTime.ToUniversalTime().Ticks.ToString() } }
+        }
+    }
+}
+
 function Read-RunState {
-    if (-not (Test-Path -LiteralPath $stateFile)) { return @() }
-    try { return @(Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json) }
-    catch { throw "无法读取进程记录，请检查文件：$stateFile" }
+    $entries = @()
+    if (Test-Path -LiteralPath $stateFile) {
+        try {
+            $savedEntries = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+            $entries = @($savedEntries | Where-Object { $_ -and $_.pid -and $_.started -and $_.service -in @('Backend', 'Frontend') })
+        }
+        catch { throw "无法读取进程记录，请检查文件：$stateFile" }
+    }
+    foreach ($entry in @(Find-ProjectWorkers)) {
+        if (-not ($entries | Where-Object { $_.pid -eq $entry.pid -and $_.started -eq $entry.started })) { $entries += $entry }
+    }
+    return $entries
 }
 
 function Get-OwnedProcess($Entry) {
+    if (-not $Entry -or -not $Entry.pid -or -not $Entry.started) { return $null }
     $process = Get-Process -Id $Entry.pid -ErrorAction SilentlyContinue
-    if ($process -and $process.StartTime.ToUniversalTime().Ticks.ToString() -eq $Entry.started) { return $process }
+    if ($process -and $process.StartTime -and $process.StartTime.ToUniversalTime().Ticks.ToString() -eq $Entry.started) { return $process }
     return $null
 }
 
@@ -112,7 +190,9 @@ function Test-ServiceReady([string]$Name) {
 }
 
 function Write-RunState($Entries) {
-    ConvertTo-Json -InputObject @($Entries) -Depth 4 | Set-Content -LiteralPath $stateFile -Encoding UTF8
+    $validEntries = @($Entries | Where-Object { $_ -and $_.pid -and $_.started -and $_.service -in @('Backend', 'Frontend') })
+    $json = if ($validEntries.Count) { ConvertTo-Json -InputObject $validEntries -Depth 4 } else { '[]' }
+    Set-Content -LiteralPath $stateFile -Value $json -Encoding UTF8
 }
 
 try {
@@ -128,7 +208,14 @@ try {
         $null = Find-Java
         $maven = Find-Maven
         Set-Location -LiteralPath (Join-Path $projectRoot 'server')
-        & $maven 'spring-boot:run' '-Dspring-boot.run.arguments=--server.port=8080'
+        $mavenArguments = @('spring-boot:run', '-Dspring-boot.run.arguments=--server.port=8080')
+        $localRepository = Join-Path $projectRoot 'tmp\maven-repository'
+        if (Test-Path -LiteralPath (Join-Path $localRepository 'org\springframework\boot\spring-boot-maven-plugin')) {
+            $mavenArguments = @("-Dmaven.repo.local=$localRepository") + $mavenArguments
+        }
+        # Native tool warnings written to stderr must not terminate PowerShell.
+        $ErrorActionPreference = 'Continue'
+        & $maven @mavenArguments
         exit $LASTEXITCODE
     }
     if ($Service -eq 'Frontend') {
@@ -143,9 +230,6 @@ try {
     $java = Find-Java
     $node = Find-Node
     $maven = Find-Maven
-    if ((-not $env:PANDORA_DB_PASSWORD -and -not $env:SPRING_DATASOURCE_PASSWORD) -or -not $env:PANDORA_JWT_SECRET -or [Text.Encoding]::UTF8.GetByteCount($env:PANDORA_JWT_SECRET) -lt 32) {
-        throw '请复制 .env.example 为 .env，填写数据库密码和至少 32 字节的随机 JWT 密钥。'
-    }
     Write-Host "Java: $java"
     Write-Host "Node: $node"
     Write-Host "Maven: $maven"
@@ -170,6 +254,7 @@ try {
                 throw "无法连接 MySQL（${databaseComputer}:$databasePort）。请先启动 MySQL 服务；首次使用请按 README 准备数据库。"
             }
         }
+        Initialize-LocalConfiguration
     }
     if ($Check) { Write-Host '环境检查通过，未启动任何服务。' -ForegroundColor Green; exit 0 }
 
@@ -180,11 +265,12 @@ try {
         try { $startLock = [IO.File]::Open((Join-Path $runDirectory 'start.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
         catch { throw '另一个启动脚本正在运行，请等待其完成。' }
         $entries = @(Read-RunState | Where-Object { Get-OwnedProcess $_ })
+        Write-RunState $entries
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
         foreach ($name in $servicesToStart) {
             $stdout = Join-Path $runDirectory "$stamp-$name.log"
             $stderr = Join-Path $runDirectory "$stamp-$name.error.log"
-            $worker = Start-Process -FilePath "$PSHOME\powershell.exe" -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath), '-Service', $name) -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $worker = Start-Process -FilePath "$PSHOME\powershell.exe" -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $launcherPath), '-Service', $name) -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
             $entry = [pscustomobject]@{ service = $name; pid = $worker.Id; started = $worker.StartTime.ToUniversalTime().Ticks.ToString(); stdout = $stdout; stderr = $stderr }
             $startedEntries += $entry
             $entries += $entry

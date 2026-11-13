@@ -76,14 +76,15 @@ try {
   // Retry while composing a todo across midnight; preserve both text and target date.
   await nav('dashboard');
   await page.locator('[data-action=todo-select][data-id="2027-01-04"]').first().click();
-  await page.locator('#modal [name=title]').fill('零点前开始填写的事项');
+  await page.locator('.todo-day-head').waitFor();
+  await page.locator('.todo-day [name=title]').fill('零点前开始填写的事项');
   await page.clock.setSystemTime(new Date('2027-01-04T23:59:59+08:00'));
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.clock.runFor(2000);
-  await page.locator('#modal [data-form=todo] button[type=submit]').click();
-  await page.waitForFunction(() => document.querySelector('#modal')?.textContent.includes('零点前开始填写的事项'));
+  await page.locator('.todo-day [data-form=todo] button[type=submit]').click();
+  await page.waitForFunction(() => document.querySelector('.todo-day')?.textContent.includes('零点前开始填写的事项'));
   assert.equal(savedTodos[0].date,'2027-01-04');
-  await close(); await nav('calendar');
+  await nav('calendar');
   await page.locator('[data-day="2027-01-05"][aria-current=date][aria-pressed=true]').waitFor();
 
   fail=false; marker='<img src=x onerror="window.calendarXss=true">';

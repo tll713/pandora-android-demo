@@ -567,10 +567,10 @@ public class DataSeeder implements ApplicationRunner {
         int daysBack = 21;
         for (String[] author : authors) {
             for (int i = 0; i < daysBack; i++) {
-                // 每位用户每 3 天保留一天空档，模拟真实的补写情况
-                if ((i + author[0].length()) % 4 == 3) continue;
                 LocalDate day = LocalDate.now().minusDays(i);
+                if (!DemoActivitySeeder.shouldSubmit(author[0], day)) continue;
                 WorkLog log = new WorkLog();
+                log.setDemo(false);
                 log.setId("l" + (seq++));
                 log.setAuthorId(author[0]);
                 log.setDate(day);

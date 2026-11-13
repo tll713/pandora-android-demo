@@ -1,0 +1,20 @@
+{
+  "apk": "pandora-demo-0.5.9.apk",
+  "version": "0.5.9",
+  "versionCode": 43,
+  "sha256": "bed20bde94dbf807b2211bfc13e74feb2de2d7701964fcfe91810d8690cd6b14",
+  "bytes": 82810,
+  "signerSha256": "6520cc6e961fe34caaf4a0d2cc4b4736ce2a000db4768a3e1aa14faddbd2499e",
+  "sameSignerAs": "pandora-demo-0.5.8.apk",
+  "embeddedAssetsMatchSource": [
+    "index.html",
+    "favicon.svg",
+    "src/app.js",
+    "src/domain.js",
+    "src/style.css",
+    "src/mobile.css"
+  ],
+  "apiBase": "http://10.17.147.160:8080/api",
+  "servedCopyMatches": true,
+  "physicalDeviceTested": false
+}

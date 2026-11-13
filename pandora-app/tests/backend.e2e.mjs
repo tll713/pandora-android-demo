@@ -68,17 +68,20 @@ try {
   await admin.goto(new URL('/',api).href);
   await admin.locator('#login-form [name=identifier]').fill('e2e-ADMIN');await admin.locator('#login-form [name=password]').fill(password);
   await admin.getByRole('button',{name:'登录管理端'}).click();
-  await admin.locator('#navigation').getByRole('link',{name:/^公司公告/}).click();
-  await admin.getByRole('button',{name:'发布公告',exact:true}).click();
-  await admin.locator('#announcement-form [name=title]').fill('真实发布公告');
-  await admin.locator('#announcement-form [name=content]').fill('<script>throw new Error("XSS")</script>公告正文\n'+('请各部门核对具体工作安排与责任人。\n'.repeat(45)));
-  await admin.locator('#announcement-form [name=pinned]').check();
-  const announcement=await mutation(admin,'/admin/announcements',()=>admin.locator('#announcement-form button[type=submit]').click());
-  assert.equal(announcement.pinned,true,'initial pinned selection must persist');
+  assert.equal(await admin.locator('#navigation').getByRole('link',{name:/^公司公告/}).count(),0);
+  assert.equal(await admin.locator('#filter-form button[type=submit]').count(),0);
+  await admin.locator('#filter-form [name=q]').fill('e2e-EMPLOYEE');
+  assert.equal(await admin.locator('tbody tr').count(),1);
+  await admin.locator('#navigation').getByRole('link',{name:/^十大内容/}).click();
+  await admin.getByRole('button',{name:'录入十大内容',exact:true}).click();
+  await admin.locator('#highlight-form [name=title]').fill('真实发布事项');
+  await admin.locator('#highlight-form [name=content]').fill('<script>throw new Error("XSS")</script>事项正文\n'+('请各部门核对具体工作安排与责任人。\n'.repeat(45)));
+  const highlight=await mutation(admin,'/admin/highlights',()=>admin.locator('#highlight-form button[type=submit]').click());
   await admin.locator('#detail-dialog').waitFor({state:'hidden'});
-  await employee.reload();await employee.locator('.dashboard-page').waitFor();await action(employee,'announcements-open');
-  assert.match(await employee.locator('#modal').innerText(),/真实发布公告/);
-  assert.match(await employee.locator('#modal').innerText(),/置顶/);
+  await employee.reload();await employee.locator('.dashboard-page').waitFor();
+  assert.equal(await employee.locator('[data-action=announcements-open]').count(),0);
+  await action(employee,'highlight',highlight.id);
+  assert.match(await employee.locator('#modal').innerText(),/真实发布事项/);
   assert.equal(await employee.locator('#modal script').count(),0);
   for (const width of [360,390]) {
     await employee.setViewportSize({width,height:844});
@@ -89,13 +92,11 @@ try {
     assert.ok(await employee.locator('#modal [data-close]').isVisible());
   }
   await employee.locator('#modal').evaluate(el=>el.scrollTop=0);
-  await employee.screenshot({path:path.join(artifacts,'mobile-announcement.png'),fullPage:true});
-  await admin.screenshot({path:path.join(artifacts,'admin-announcement.png'),fullPage:true});
-  await mutation(admin,`/admin/announcements/${announcement.id}`,()=>admin.locator(`[data-action=toggle-announcement][data-id="${announcement.id}"]`).click(),'PUT');
-  await admin.getByRole('button',{name:'置顶',exact:true}).waitFor();
-  await admin.locator(`[data-action=delete-announcement][data-id="${announcement.id}"]`).click();
-  await mutation(admin,`/admin/announcements/${announcement.id}`,()=>admin.locator('#confirm-submit').click(),'DELETE');
-  assert.equal((await workspace(employee)).db.announcements.length,0);
+  await employee.screenshot({path:path.join(artifacts,'mobile-highlight.png'),fullPage:true});
+  await admin.screenshot({path:path.join(artifacts,'admin-highlight.png'),fullPage:true});
+  await admin.locator(`[data-action=delete-highlight][data-id="${highlight.id}"]`).click();
+  await mutation(admin,`/admin/highlights/${highlight.id}`,()=>admin.locator('#confirm-submit').click(),'DELETE');
+  assert.equal((await workspace(employee)).db.highlights.length,0);
 
   const token=await employee.evaluate(()=>localStorage.getItem('pandora.token'));
   const headers={Authorization:'Bearer '+token};
@@ -119,5 +120,5 @@ try {
   assert.equal((await employee.request.get(api+'/admin/users',{headers})).status(),403);
   assert.equal((await employee.request.post(api+'/auth/register',{data:{phone:'13999999999',password}})).status(),403);
   assert.deepEqual(errors,[]);
-  console.log('Real backend E2E passed: task approval/progress/completion, log versions, pinned announcement lifecycle, Android CSP and API authorization.');
+  console.log('Real backend E2E passed: task approval/progress/completion, log versions, account live search and home highlight lifecycle, Android CSP and API authorization.');
 } finally {await Promise.all(contexts.map(c=>c.close()));await browser.close();}

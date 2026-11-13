@@ -270,6 +270,27 @@ CREATE TABLE IF NOT EXISTS workspace_notifications (
   INDEX idx_notification_recipient (recipient_id, created_at)
 );
 
+-- One-time undo restores only the date recorded by the last successful move.
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'daily_todos' AND column_name = 'previous_date') = 0,
+  'ALTER TABLE daily_todos ADD COLUMN previous_date DATE, ADD COLUMN move_token VARCHAR(36), ADD COLUMN revision BIGINT NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+-- Mark known untouched seed records once; user edits become real submissions.
+SET @pandora_mark_demo = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'work_logs' AND column_name = 'is_demo') = 0;
+SET @pandora_ddl = IF(@pandora_mark_demo,
+  'ALTER TABLE work_logs ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+SET @pandora_ddl = IF(@pandora_mark_demo,
+  'UPDATE work_logs l SET is_demo = TRUE WHERE (l.id LIKE ''demo-log-%'' OR l.id REGEXP ''^l[0-9]+$'') AND NOT EXISTS (SELECT 1 FROM log_versions v WHERE v.log_id = l.id)', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
 -- 标签按紧急程度着色：URGENT / IMPORTANT / NORMAL / LONGTERM
 SET @pandora_ddl = IF(
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tags' AND column_name = 'urgency') = 0,

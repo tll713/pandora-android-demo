@@ -31,10 +31,6 @@ const users = [
   { id: 'zhou', name: '周一鸣', role: 'TEAM_LEAD', department: '产品设计部', enabled: true },
   { id: 'chen', name: '陈嘉宁', role: 'EMPLOYEE', department: '市场运营部', enabled: false }
 ];
-const announcements = [
-  { id: 'a1', title: '关于本周团队工作安排', category: '通知', content: '请各位成员按时查看公司通知。', date: '2026-10-23', pinned: true },
-  { id: 'a2', title: '团队协作规范更新', category: '制度', content: '最新制度请以本公告为准。', date: '2026-10-22', pinned: false }
-];
 const highlights = [];
 const tasks = [{id:'task-1', title:'客户方案评审', detail:'确认方案与验收标准', dueAt:'2026-10-27T15:00', owners:['lin'], ownerNames:['林予安']}];
 let currentUser = users[0], failLoad = false, unauthorized = false;
@@ -51,7 +47,7 @@ await page.route('**/api/**', async route => {
   if (method === 'GET') {
     requests.push(p);
     if (failLoad && p === '/admin/users') return send({ error: '测试数据加载失败' }, 500);
-    const data = { '/admin/users': users, '/announcements': announcements, '/admin/highlights':highlights, '/admin/tasks':tasks, '/admin/operations':[] }[p];
+    const data = { '/admin/users': users, '/admin/highlights':highlights, '/admin/tasks':tasks, '/admin/operations':[] }[p];
     return data ? send(data) : send({ error: '未知请求' }, 404);
   }
   mutations.push({ p, method, body });
@@ -72,14 +68,6 @@ await page.route('**/api/**', async route => {
     const user = users.find(user => user.id === decodeURIComponent(p.split('/').at(-1))); Object.assign(user, body); return send(user);
   }
   if (p.endsWith('/password')) return send({ message: '密码已重置' });
-  if (p === '/admin/announcements' && method === 'POST') {
-    announcements.push({ ...body, id: 'a' + (announcements.length + 1), date: '2026-10-24' }); return send(announcements.at(-1));
-  }
-  if (p.startsWith('/admin/announcements/')) {
-    const index = announcements.findIndex(a => a.id === p.split('/').at(-1));
-    if (method === 'DELETE') { announcements.splice(index, 1); return send({ ok: true }); }
-    Object.assign(announcements[index], body); return send(announcements[index]);
-  }
   return send({ error: '未实现的测试请求' }, 404);
 });
 const go = async name => {
@@ -94,18 +82,47 @@ const login = async name => {
   await page.getByRole('button', { name: '登录管理端' }).click();
 };
 try {
-  await page.goto(url);
+  await page.goto(url+'/#announcements');
   await page.locator('#login-view').waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(artifacts, 'login.png'), fullPage: true });
   await login('林予安');
   await page.locator('#login-error').getByText('仅管理员和创始人可登录管理后台').waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('pandora.admin.token')), null);
   await login('系统管理员'); await waitReload();
-  assert.deepEqual([...new Set(requests)].sort(), ['/admin/highlights','/admin/operations','/admin/tasks','/admin/users', '/announcements']);
-  assert.equal(await page.locator('#navigation a').count(), 4);
+  assert.deepEqual([...new Set(requests)].sort(), ['/admin/highlights','/admin/operations','/admin/tasks','/admin/users']);
+  assert.equal(await page.locator('#navigation a').count(), 3);
+  assert.deepEqual(await page.locator('#navigation a').allTextContents(),['组织与账号','系统日志','十大内容']);
+  assert.equal(new URL(page.url()).hash,'#users');
+  assert.doesNotMatch(await page.locator('body').innerText(),/公司公告/);
   assert.equal(await page.locator('#page-title').textContent(), '组织与账号');
   await page.screenshot({ path: path.join(artifacts, 'organization.png'), fullPage: true });
   checks.push('默认进入组织与账号，支持十大内容管理');
+
+  assert.equal(await page.locator('#filter-form button[type=submit]').count(),0);
+  const query=page.locator('#filter-form [name=q]');
+  await query.pressSequentially('林');
+  assert.equal(await page.locator('tbody tr').count(),1);
+  assert.match(await page.locator('tbody').innerText(),/林予安/);
+  await query.pressSequentially('予');
+  assert.equal(await query.inputValue(),'林予');
+  assert.equal(await query.evaluate(el=>el===document.activeElement),true);
+  await query.fill('没有这个账号');
+  assert.equal(await page.locator('tbody tr').count(),0);
+  await query.fill('');
+  assert.equal(await page.locator('tbody tr').count(),5);
+  await query.evaluate(input=>{
+    input.focus(); input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+    input.value='林'; input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
+    if(document.querySelector('#filter-form [name=q]')!==input) throw new Error('Composition replaced the account search input');
+    input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'林'}));
+  });
+  assert.equal(await page.locator('tbody tr').count(),1);
+  await page.locator('#filter-form [name=role]').selectOption('EMPLOYEE');
+  assert.equal(await query.inputValue(),'林');
+  assert.equal(await page.locator('tbody tr').count(),1);
+  await page.locator('[data-action=reset-filters]').click();
+  assert.equal(await page.locator('tbody tr').count(),5);
+  checks.push('组织账号输入即搜索，支持中文输入、清空、组合筛选与重置');
 
   await page.locator('#filter-form [name=department]').selectOption('产品设计部');
   assert.equal(await page.locator('tbody tr').count(), 2);
@@ -123,6 +140,7 @@ try {
   assert.equal(users.at(-1).gender,'女'); assert.equal(users.at(-1).phone,'13800138001');
   await page.getByRole('button', { name: '已保存密码', exact: true }).click();
   await page.locator('#detail-dialog').waitFor({ state: 'hidden' }); await waitReload();
+  await page.locator('#temporary-password').waitFor({ state: 'detached' });
   assert.equal(await page.locator('#temporary-password').count(),0);
   await page.locator('[data-action=edit-user][data-id=test-member]').click();
   await page.locator('#user-form [name=enabled]').uncheck();
@@ -140,23 +158,11 @@ try {
   assert.equal(mutations.at(-1).body.password, 'new-password-123');
   checks.push('组织成员筛选、账号创建停用与密码重置');
 
-  await go('公司公告');
-  await page.screenshot({ path: path.join(artifacts, 'announcements.png'), fullPage: true });
-  await page.getByRole('button', { name: '发布公告', exact: true }).click();
-  await page.locator('#announcement-form [name=title]').fill('验收公告');
-  await page.locator('#announcement-form [name=content]').fill('发布测试正文');
-  await page.locator('#announcement-form button[type=submit]').click();
-  await page.locator('#detail-dialog').waitFor({ state: 'hidden' }); await waitReload();
-  await page.locator('[data-action=edit-announcement][data-id=a3]').click();
-  await page.locator('#announcement-form [name=content]').fill('更新后的正文');
-  await page.locator('#announcement-form [name=pinned]').check();
-  await page.getByRole('button', { name: '保存修改', exact: true }).click();
-  await page.locator('#detail-dialog').waitFor({ state: 'hidden' }); await waitReload();
-  assert.equal(announcements.at(-1).pinned, true);
-  await page.locator('[data-action=delete-announcement][data-id=a3]').click();
-  await page.locator('#confirm-submit').click(); await waitReload();
-  assert.equal(announcements.length, 2);
-  checks.push('公告发布、编辑、置顶与删除确认');
+  await page.evaluate(()=>{location.hash='announcements';});
+  await page.waitForURL('**/#users');
+  assert.equal(await page.locator('#page-title').textContent(),'组织与账号');
+  assert.equal(requests.some(p=>p.includes('announcements')),false);
+  checks.push('公司公告栏目已移除，旧链接回到组织与账号，管理端不请求公告数据');
 
   await go('十大内容');
   for(const [kind,title] of [['company','公司年度重点'],['dispatch','重点派发任务'],['personal','个人重点计划']]) {
@@ -209,7 +215,7 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'mobile-organization.png'), fullPage: true });
   await page.locator('[data-action=menu]').click();
   assert.equal(await page.locator('#app-view').evaluate(el => el.classList.contains('menu-open')), true);
-  await go('公司公告');
+  await go('系统日志');
   assert.equal(await page.locator('#app-view').evaluate(el => el.classList.contains('menu-open')), false);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.locator('[data-action=menu]').click();await go('十大内容');

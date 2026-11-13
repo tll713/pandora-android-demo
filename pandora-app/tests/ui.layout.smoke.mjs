@@ -25,9 +25,8 @@ try {
   await page.reload();
   await page.locator('.dashboard-page').waitFor();
   assert.equal(await page.locator('.dashboard-tile').count(), 3);
-  await page.locator('[data-action=announcements-open]').click();
-  assert.match(await page.locator('#modal').innerText(),/公司重要展示项/);
-  await page.locator('[data-close]').click();
+  assert.equal(await page.locator('[data-action=announcements-open]').count(),0);
+  assert.doesNotMatch(await page.locator('.dashboard-page').innerText(),/公司公告/);
   assert.equal(await page.locator('[data-route="tasks"]').count(), 0, 'standalone task navigation should be removed');
   await page.locator('.dashboard-tile').first().locator('.tile-open').click();
   assert.match(await page.locator('#modal').innerText(), /事件纪/);
@@ -36,7 +35,7 @@ try {
   await page.locator('[data-route="calendar"]').click();
   assert.equal(await page.locator('.month-task-span').count(),3);
   await page.locator('.calendar-day.is-today .day-date').click();
-  await page.locator('.calendar-mode-tabs [data-mode=day]').click();
+  await page.locator('.calendar-mode-tabs [data-mode=week]').click();
   assert.equal(await page.locator('.timeline-item').count(),6);
   assert.equal(await page.locator('.timeline-item.event--log').count(),1);
   await page.locator('[data-task-view="list"]').click();
@@ -44,7 +43,7 @@ try {
   await page.locator('[data-task-view="calendar"]').click();
   await page.locator('[data-action="calendar-back"]').click();
   await page.locator('.calendar-day.is-today .day-date').click();
-  await page.locator('.calendar-mode-tabs [data-mode=day]').click();
+  await page.locator('.calendar-mode-tabs [data-mode=week]').click();
   assert.equal(await page.locator('.timeline-item').count(),6);
   for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 844 }, { width: 1280, height: 900 }]) {
     await page.setViewportSize(viewport);

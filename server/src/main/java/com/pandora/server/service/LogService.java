@@ -131,6 +131,7 @@ public class LogService {
             v.setActorId(existing.getAuthorId());
             existing.getVersions().add(v);
             existing.setTitle(title);
+            existing.setDemo(false);
             existing.setContent(content);
             existing.setTaskId(taskId);
             existing.setTagId(tagId);

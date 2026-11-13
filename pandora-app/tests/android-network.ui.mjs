@@ -35,7 +35,7 @@ try {
       await page.locator('[data-route=calendar]').click();
       await page.locator('.ios-calendar--month').waitFor();
       await page.locator('.calendar-day.is-today .day-date').click();
-      await page.locator('.calendar-mode-tabs [data-mode=day]').click();
+      await page.locator('.calendar-mode-tabs [data-mode=week]').click();
       await page.locator('.calendar-day-timeline').waitFor();
       await page.screenshot({path:path.join(artifacts,'android-network-login.png'),fullPage:true});
     }

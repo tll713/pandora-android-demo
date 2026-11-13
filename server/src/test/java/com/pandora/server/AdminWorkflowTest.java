@@ -75,8 +75,9 @@ class AdminWorkflowTest {
 
     @Test
     void todoReschedulingPersistsAndRejectsOtherOwnersAndInvalidDates() throws Exception {
-        String today = java.time.LocalDate.now().toString();
-        String nextMonth = java.time.LocalDate.now().plusMonths(1).withDayOfMonth(1).toString();
+        var currentDay = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"));
+        String today = currentDay.toString();
+        String nextMonth = currentDay.plusMonths(1).withDayOfMonth(1).toString();
         JsonNode todo = call("POST", "/api/todos", employee, Map.of("date", today, "title", "需要改期的事项"));
         String path = "/api/todos/" + todo.get("id").asText();
         call("POST", path + "/toggle", employee, null);
@@ -94,6 +95,19 @@ class AdminWorkflowTest {
         JsonNode workspace = call("GET", "/api/workspace", employee, null);
         assertTrue(java.util.stream.StreamSupport.stream(workspace.get("db").get("todos").spliterator(), false)
                 .anyMatch(item -> item.get("id").equals(todo.get("id")) && item.get("date").asText().equals(nextMonth)));
+        mvc.perform(put(path + "/date").header("Authorization", "Bearer " + employee)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("date", currentDay.minusDays(1).toString()))))
+                .andExpect(status().isBadRequest());
+        String moveToken = moved.get("moveToken").asText();
+        mvc.perform(post(path + "/date/undo").header("Authorization", "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("token", moveToken))))
+                .andExpect(status().isBadRequest());
+        JsonNode restored = call("POST", path + "/date/undo", employee, Map.of("token", moveToken));
+        assertEquals(today, restored.get("date").asText());
+        assertTrue(restored.get("done").asBoolean());
+        mvc.perform(post(path + "/date/undo").header("Authorization", "Bearer " + employee)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("token", moveToken))))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -102,9 +116,12 @@ class AdminWorkflowTest {
         JsonNode log = call("POST", "/api/logs", employee, Map.of("values", Map.of("date", today,
                 "content", "【今日完成】\n完成工作\n\n【下一步计划】\n\n\n【问题与协助】", "tagId", "design")));
         assertEquals("design", log.get("tagId").asText());
+        jdbc.update("UPDATE work_logs SET is_demo = TRUE WHERE id = ?", log.get("id").asText());
         JsonNode edited = call("POST", "/api/logs", employee, Map.of("logId", log.get("id").asText(), "values",
                 Map.of("date", today, "content", "更新工作", "tagId", "")));
         assertTrue(edited.get("tagId").isNull());
+        assertFalse(edited.get("demo").asBoolean());
+        assertEquals(Boolean.FALSE, jdbc.queryForObject("SELECT is_demo FROM work_logs WHERE id = ?", Boolean.class, log.get("id").asText()));
     }
 
     @Test

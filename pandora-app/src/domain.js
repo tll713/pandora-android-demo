@@ -8,6 +8,31 @@ export const USERS = [
 ];
 export const STATUS = { todo: '待开始', doing: '进行中', done: '已完成' };
 export const PRIORITY = { high: '高优先级', medium: '中优先级', low: '低优先级' };
+export const isDemoLog = log => log.demo === true || (log.demo == null && (log.id || '').startsWith('demo-log-'));
+export const taskMatchesQuery = (task, query) => !query.trim() || `${task.title} ${task.detail || ''} ${namesForSearch(task.owners)}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+const namesForSearch = owners => (owners || []).map(id => userById(id)?.name || id).join('、');
+// Clip scheduled work to the selected local day; spanning tasks still have timed hours.
+export function taskDayInterval(task, day) {
+  if (!taskOccursOn(task, day)) return null;
+  const start = taskStartAt(task), end = task.dueAt;
+  const minutes = value => Number(value.slice(11,13)) * 60 + Number(value.slice(14,16));
+  return { start: start.slice(0,10) < day ? 0 : minutes(start), end: end.slice(0,10) > day ? 1440 : minutes(end) };
+}
+export function taskDayLayout(tasks, day) {
+  const entries = tasks.map(task => ({task, ...taskDayInterval(task, day)})).filter(entry => entry.start != null)
+    .sort((a,b) => a.start - b.start || a.end - b.end || a.task.id.localeCompare(b.task.id));
+  let cluster = [], ends = [], clusterEnd = -1;
+  const finish = () => cluster.forEach(entry => { entry.columns = ends.length; });
+  for (const entry of entries) {
+    if (entry.start >= clusterEnd) { finish(); cluster = []; ends = []; }
+    let lane = ends.findIndex(end => end <= entry.start);
+    if (lane < 0) lane = ends.length;
+    ends[lane] = Math.max(entry.end,entry.start + 36);
+    entry.lane = lane; cluster.push(entry); clusterEnd = Math.max(...ends);
+  }
+  finish();
+  return entries;
+}
 export function logSections(content = '') {
   const match = /^【今日完成】\n([\s\S]*?)\n\n【下一步计划】\n([\s\S]*?)\n\n【问题与协助】(?:\n([\s\S]*))?$/.exec(content);
   return match ? { content: match[1], plan: match[2], issues: match[3] || '' } : { content, plan: '', issues: '' };
