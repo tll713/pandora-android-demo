@@ -1,0 +1,22 @@
+{
+  "apk": "pandora-demo-0.5.10.apk",
+  "version": "0.5.10",
+  "versionCode": 44,
+  "sha256": "2cff2ff6bae2160764cb652e8889fa47a3080f64d427aa3aa6b7a4ad944d4ac7",
+  "bytes": 82810,
+  "signerSha256": "6520cc6e961fe34caaf4a0d2cc4b4736ce2a000db4768a3e1aa14faddbd2499e",
+  "sameSignerAs": "pandora-demo-0.5.9.apk",
+  "embeddedAssetsMatchSource": [
+    "index.html",
+    "favicon.svg",
+    "src/app.js",
+    "src/domain.js",
+    "src/style.css",
+    "src/mobile.css"
+  ],
+  "apiBase": "http://10.17.147.160:8080/api",
+  "servedCopyMatches": true,
+  "physicalDeviceTested": false,
+  "httpDownloadVerified": false,
+  "httpDownloadCheck": "Connection refused at 127.0.0.1:8080; start the latest backend with start.cmd before downloading or using the app."
+}

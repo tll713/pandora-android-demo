@@ -15,7 +15,7 @@ const state = { token: localStorage.getItem('pandora.token'), user: null, route:
   logDepartment: '', logRole: '', logAuthor: '', logFrom: '', logTo: '', logSubmission: 'all', logCheckDate: dateKey(), messageFilter: 'all',
   taskQuery: '', taskPriority: '', taskScope: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null,
   calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
-const APP_VERSION = '0.5.9';
+const APP_VERSION = '0.5.10';
 let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '', workspaceLoad = 0;
 
 function validCalendarMetadata(data, year) {
