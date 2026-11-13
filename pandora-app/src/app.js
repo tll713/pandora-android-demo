@@ -17,6 +17,7 @@ const state = { token: localStorage.getItem('pandora.token'), user: null, route:
   calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
 const APP_VERSION = '0.5.10';
 let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '', workspaceLoad = 0;
+let todoDateVersion = 0;
 
 function validCalendarMetadata(data, year) {
   return data?.year === Number(year) && typeof data.published === 'boolean'
@@ -91,10 +92,13 @@ async function api(path, options = {}) {
 async function loadWorkspace() {
   const token = state.token;
   const load = ++workspaceLoad;
+  const dateVersion = todoDateVersion;
   const data = await api('/workspace');
   if (state.token !== token || load !== workspaceLoad) return;
   // History may have completed while this workspace request was in flight.
   const cachedLogs = state.logHistoryLoaded ? state.db?.logs || [] : [];
+  // A snapshot requested before a confirmed move/undo must not restore old dates.
+  if (dateVersion !== todoDateVersion) data.db.todos = state.db.todos;
   state.user = data.user;
   state.db = data.db;
   if (state.logHistoryLoaded) {
@@ -916,7 +920,9 @@ async function moveTodo(id, date) {
   try {
     const saved = await api(`/todos/${encodeURIComponent(id)}/date`, {method:'PUT',body:JSON.stringify({date})});
     if (state.token !== token) return false;
-    Object.assign(todo,saved);
+    const current = state.db.todos?.find(t => t.id === id);
+    if (current) Object.assign(current,saved);
+    todoDateVersion++;
     render(true); refreshTodoDialog();
     notify(`已移至 ${shortDate(date)}`,false,saved.moveToken ? async () => {
       try {
@@ -924,6 +930,7 @@ async function moveTodo(id, date) {
         if (state.token !== token) return;
         const current = state.db.todos?.find(t => t.id === id);
         if (current) Object.assign(current,restored);
+        todoDateVersion++;
         render(true); refreshTodoDialog(); notify('已撤销改期');
       } catch (error) { notify(error.message,true); }
     } : null);
