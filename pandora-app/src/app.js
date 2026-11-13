@@ -16,7 +16,7 @@ const state = { token: localStorage.getItem('pandora.token'), user: null, route:
   taskQuery: '', taskPriority: '', taskScope: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null,
   calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
 const APP_VERSION = '0.5.9';
-let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '';
+let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '', workspaceLoad = 0;
 
 function validCalendarMetadata(data, year) {
   return data?.year === Number(year) && typeof data.published === 'boolean'
@@ -90,9 +90,11 @@ async function api(path, options = {}) {
 
 async function loadWorkspace() {
   const token = state.token;
-  const cachedLogs = state.logHistoryLoaded ? state.db?.logs || [] : [];
+  const load = ++workspaceLoad;
   const data = await api('/workspace');
-  if (state.token !== token) return;
+  if (state.token !== token || load !== workspaceLoad) return;
+  // History may have completed while this workspace request was in flight.
+  const cachedLogs = state.logHistoryLoaded ? state.db?.logs || [] : [];
   state.user = data.user;
   state.db = data.db;
   if (state.logHistoryLoaded) {
@@ -150,6 +152,19 @@ async function save(action, message) {
   const returnToMessages = modal.open && modal.dataset.messages === 'request';
   try { await action(); await loadWorkspace(); close(); render(); if (returnToMessages) openMessages(); notify(message); }
   catch (e) { notify(e.message, true); }
+}
+
+async function submitOnce(form, operation) {
+  if (form.dataset.submitting) return;
+  form.dataset.submitting = 'true';
+  const buttons = [...form.querySelectorAll('[type="submit"]')];
+  const disabled = buttons.map(button => button.disabled);
+  buttons.forEach(button => button.disabled = true);
+  try { return await operation(); }
+  finally {
+    delete form.dataset.submitting;
+    buttons.forEach((button,index) => button.disabled = disabled[index]);
+  }
 }
 
 function logout() {
@@ -755,12 +770,23 @@ async function loadLogComments(id) {
     if (state.token !== token) return;
     state.logComments[id] = {status:'error',items:[]};
   }
-  if (modal.open && modal.dataset.log === id) {
-    const draft = modal.querySelector('[name=content]')?.value || '';
-    await logDetail(id);
-    const field = modal.querySelector('[name=content]');
-    if (field) field.value = draft;
-  }
+  refreshLogComments(id);
+}
+
+function logCommentsHtml(entry, id) {
+  const comments = entry?.items || [];
+  return entry?.status === 'loading' ? '<p class="panel-note" role="status">正在加载评论…</p>'
+    : entry?.status === 'error' ? `<p class="panel-note" role="alert">评论加载失败，请重试 ${button('重试','retry-log-comments',id,'text-button')}</p>`
+    : comments.length ? comments.map(c => `<div class="comment-item"><strong>${esc(c.authorName)}</strong> · ${stamp(c.createdAt)}<p>${esc(c.content)}</p></div>`).join('') : '<p class="panel-note">暂无评论</p>';
+}
+
+function refreshLogComments(id) {
+  if (!modal.open || modal.dataset.log !== id) return;
+  const heading = modal.querySelector('[data-comment-count]'), list = modal.querySelector('[data-log-comments]');
+  const entry = state.logComments[id];
+  if (heading) heading.textContent = `评论${entry?.status === 'ready' ? `（${entry.items.length}）` : ''}`;
+  // Keep the textarea node, IME composition, focus and expanded versions intact.
+  if (list) list.innerHTML = logCommentsHtml(entry,id);
 }
 
 async function logDetail(id) {
@@ -775,13 +801,11 @@ async function logDetail(id) {
     entry = state.logComments[id];
   }
   const comments = entry?.items || [];
-  const commentsHtml = entry?.status === 'loading' ? '<p class="panel-note" role="status">正在加载评论…</p>'
-    : entry?.status === 'error' ? `<p class="panel-note" role="alert">评论加载失败，请重试 ${button('重试','retry-log-comments',id,'text-button')}</p>`
-    : comments.length ? comments.map(c => `<div class="comment-item"><strong>${esc(c.authorName)}</strong> · ${stamp(c.createdAt)}<p>${esc(c.content)}</p></div>`).join('') : '<p class="panel-note">暂无评论</p>';
+  const commentsHtml = logCommentsHtml(entry,id);
   const commentForm = canComment ?
     `<form class="modal-form comment-form" data-form="log-comment" data-id="${esc(id)}"><label>发表评论<textarea name="content" maxlength="1000" rows="3" placeholder="对这篇日志的评论或批示…"></textarea></label><div class="modal-actions"><button class="primary-button" type="submit">发表评论</button></div></form>` :
     '<p class="panel-note">不能评论自己的日志，等待上级批示</p>';
-  open(l.title, `<p class="detail-copy">${esc(userById(l.author)?.name)} · ${l.date}</p><p class="detail-copy log-content">${esc(l.content)}</p>${linkedBlock}<div class="detail-actions">${canEditLog(user(),l) ? button('编辑这篇日志','edit-log',id,'primary-button') : '<span class="done-message">超过三天或他人日志只读</span>'}</div><div class="detail-history"><h3>修改记录（${l.versions?.length || 0}）</h3>${[...(l.versions || [])].reverse().map((v,i) => `<details class="version-item"><summary>历史版本 ${(l.versions?.length || 0)-i} · ${stamp(v.at)}</summary><b>${esc(v.title)}</b><p class="log-content">${esc(v.content)}</p></details>`).join('') || '<p class="panel-note">尚无修改记录</p>'}</div><div class="detail-history"><h3>评论${entry?.status === 'ready' ? `（${comments.length}）` : ''}</h3>${commentsHtml}${commentForm}</div>`);
+  open(l.title, `<p class="detail-copy">${esc(userById(l.author)?.name)} · ${l.date}</p><p class="detail-copy log-content">${esc(l.content)}</p>${linkedBlock}<div class="detail-actions">${canEditLog(user(),l) ? button('编辑这篇日志','edit-log',id,'primary-button') : '<span class="done-message">超过三天或他人日志只读</span>'}</div><div class="detail-history"><h3>修改记录（${l.versions?.length || 0}）</h3>${[...(l.versions || [])].reverse().map((v,i) => `<details class="version-item"><summary>历史版本 ${(l.versions?.length || 0)-i} · ${stamp(v.at)}</summary><b>${esc(v.title)}</b><p class="log-content">${esc(v.content)}</p></details>`).join('') || '<p class="panel-note">尚无修改记录</p>'}</div><div class="detail-history"><h3 data-comment-count>评论${entry?.status === 'ready' ? `（${comments.length}）` : ''}</h3><div data-log-comments>${commentsHtml}</div>${commentForm}</div>`);
   modal.dataset.log = id;
 }
 
@@ -867,7 +891,7 @@ async function action(name,id) {
   if (name === 'logout') return logout();
   if (name === 'clear-log-filters') { resetLogFilters(); render(); return; }
   if (name === 'retry-log-history') return loadLogHistory();
-  if (name === 'retry-log-comments') { delete state.logComments[id]; return logDetail(id); }
+  if (name === 'retry-log-comments') { const loading = loadLogComments(id); refreshLogComments(id); return loading; }
   if (name === 'log-member-history') { state.logAuthor = id; state.logSubmission = 'all'; state.logFrom = ''; state.logTo = ''; state.logRange = 'all'; render(); return loadLogHistory(); }
   if (name === 'route-tasks') { state.route = 'calendar'; state.taskView = 'list'; render(); window.scrollTo(0,0); return; }
   if (name === 'pin') return save(async () => { await api(`/tasks/${id}/pin`, { method: 'POST' }); },'个人重点已更新');
@@ -1132,7 +1156,7 @@ document.addEventListener('submit', async e => {
   }
   if (form.dataset.form === 'task') {
     v.owners=fd.getAll('owners');
-    await save(async () => { await api('/tasks/requests', { method: 'POST', body: JSON.stringify({ kind: id ? 'edit' : 'create', taskId: id || undefined, values: v }) }); }, id ? '任务修改申请已提交' : '任务创建申请已提交');
+    return submitOnce(form, () => save(async () => { await api('/tasks/requests', { method: 'POST', body: JSON.stringify({ kind: id ? 'edit' : 'create', taskId: id || undefined, values: v }) }); }, id ? '任务修改申请已提交' : '任务创建申请已提交'));
   }
   if (form.dataset.form === 'note') await save(async () => { await api(`/tasks/${id}/progress`, { method: 'POST', body: JSON.stringify({ text: v.note }) }); },'工作进展已保存');
   if (form.dataset.form === 'log') {

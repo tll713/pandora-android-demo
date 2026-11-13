@@ -42,7 +42,7 @@ public class WorkLog {
 
     @OneToMany(mappedBy = "log", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("at DESC")
-    private List<LogVersion> versions;
+    private List<LogVersion> versions = new java.util.ArrayList<>();
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

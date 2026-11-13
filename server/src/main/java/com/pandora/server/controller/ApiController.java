@@ -112,28 +112,8 @@ public class ApiController {
         if (!Set.of("name", "gender", "idNumber").containsAll(body.keySet()))
             return ResponseEntity.status(403).body(Map.of("error", "部门、手机号、角色与账号状态由管理员维护"));
         try {
-            String name = body.get("name");
-            String gender = body.get("gender");
-            String idNumber = body.get("idNumber");
-            if (name == null || name.trim().isEmpty() || name.trim().length() > 30)
-                throw new IllegalArgumentException("姓名需为 1～30 个字");
-            if (gender == null || !List.of("男", "女", "其他").contains(gender.trim()))
-                throw new IllegalArgumentException("请选择有效性别");
-            String idv = idNumber == null ? "" : idNumber.trim().toUpperCase();
-            if (!idv.matches("^[0-9]{17}[0-9X]$"))
-                throw new IllegalArgumentException("身份证号需为 18 位有效格式");
-            try {
-                java.time.LocalDate.of(Integer.parseInt(idv.substring(6, 10)),
-                        Integer.parseInt(idv.substring(10, 12)), Integer.parseInt(idv.substring(12, 14)));
-            } catch (Exception e) {
-                throw new IllegalArgumentException("身份证号中的出生日期无效");
-            }
-            user.setName(name.trim());
-            user.setGender(gender.trim());
-            user.setIdNumber(idv);
-            user.setAvatar(name.trim().substring(name.trim().length() - 1));
-            userRepository.save(user);
-            return ResponseEntity.ok(profileToMap(user));
+            User updated = userService.updateProfile(user, body.get("name"), body.get("gender"), body.get("idNumber"));
+            return ResponseEntity.ok(profileToMap(updated));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }

@@ -1,6 +1,8 @@
 package com.pandora.server.service;
 
 import com.pandora.server.model.User;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import com.pandora.server.repository.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,10 +29,12 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EntityManager entityManager;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, EntityManager entityManager) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.entityManager = entityManager;
     }
 
     public List<User> getAllUsers() {
@@ -39,6 +43,8 @@ public class UserService {
 
     @Transactional
     public void changePassword(User user, String currentPassword, String newPassword) {
+        user = lockCurrentUser(user.getId());
+        requireActive(user);
         if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash()))
             throw new IllegalArgumentException("原密码不正确");
         if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 64
@@ -93,7 +99,7 @@ public class UserService {
     @Transactional
     public User updateUser(User actor, String id, String name, String phone, String gender,
                            String idNumber, String department, String role, boolean enabled) {
-        User target = userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
+        User target = lockCurrentUser(id);
         requireAccountAdmin(actor, target);
         name = validateName(name);
         phone = normalizePhone(phone);
@@ -144,8 +150,35 @@ public class UserService {
             if (e.getMessage() != null && e.getMessage().contains("不能超过")) throw e;
             throw new IllegalArgumentException("请选择有效的 JPEG 头像");
         }
+        user = lockCurrentUser(user.getId());
+        requireActive(user);
         user.setAvatarData(avatarData);
         return userRepository.save(user);
+    }
+
+    // Refresh under the row lock even when OSIV has already cached an older User.
+    private User lockCurrentUser(String id) {
+        User current = userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
+        entityManager.refresh(current, LockModeType.PESSIMISTIC_WRITE);
+        return current;
+    }
+
+    private void requireActive(User user) {
+        if (!user.isOrganizationMember()) throw new IllegalArgumentException("账号已停用或组织归属已变更，请重新登录");
+    }
+
+    @Transactional
+    public User updateProfile(User user, String name, String gender, String idNumber) {
+        name = validateName(name);
+        gender = validateGender(gender);
+        idNumber = validateIdNumber(idNumber);
+        if (gender == null) throw new IllegalArgumentException("请选择有效性别");
+        if (idNumber == null) throw new IllegalArgumentException("身份证号需为 18 位有效格式");
+        User current = lockCurrentUser(user.getId());
+        requireActive(current);
+        current.setName(name); current.setGender(gender); current.setIdNumber(idNumber);
+        current.setAvatar(name.substring(name.length() - 1));
+        return userRepository.save(current);
     }
 
     private String validateName(String name) {
@@ -206,7 +239,7 @@ public class UserService {
 
     @Transactional
     public void resetPassword(User actor, String id, String password) {
-        User target = userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
+        User target = lockCurrentUser(id);
         requireAccountAdmin(actor, target);
         if (password == null || password.isBlank() || password.length() < 8 || password.length() > 64
                 || password.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 72)

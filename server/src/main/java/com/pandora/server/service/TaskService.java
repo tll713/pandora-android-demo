@@ -3,6 +3,9 @@ package com.pandora.server.service;
 import com.pandora.server.model.*;
 import com.pandora.server.repository.*;
 import org.springframework.stereotype.Service;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.LockModeType;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -20,6 +23,7 @@ public class TaskService {
     private final PinRepository pinRepository;
     private final TagRepository tagRepository;
     private final NotificationService notifications;
+    @PersistenceContext private EntityManager entityManager;
 
     public TaskService(TaskRepository taskRepository, TaskOwnerRepository taskOwnerRepository,
                        TaskHistoryRepository taskHistoryRepository, ChangeRequestRepository changeRequestRepository,
@@ -93,6 +97,10 @@ public class TaskService {
         if (!"create".equals(kind) && !proposer.isManager())
             throw new IllegalArgumentException("当前身份不能编辑或删除任务");
 
+        if ("create".equals(kind)) {
+            // Serialize identical creates from the same applicant, including network retries.
+            userRepository.findForUpdate(proposer.getId()).orElseThrow(() -> new IllegalArgumentException("申请人不存在"));
+        }
         Task task = null;
         if (!"create".equals(kind)) {
             task = lockTask(taskId);
@@ -107,6 +115,12 @@ public class TaskService {
             after = validateTaskValues(proposer, values, task);
         }
 
+        if ("create".equals(kind)) {
+            for (ChangeRequest pending : changeRequestRepository.findByProposerId(proposer.getId())) {
+                if (pending.getKind() == ChangeRequest.Kind.CREATE && pending.getStatus() == ChangeRequest.Status.PENDING
+                        && Objects.equals(fromJson(pending.getAfterJson()), after)) return pending;
+            }
+        }
         ChangeRequest req = new ChangeRequest();
         req.setId("request-" + UUID.randomUUID());
         req.setKind(ChangeRequest.Kind.valueOf(kind.toUpperCase()));
@@ -193,6 +207,7 @@ public class TaskService {
             if (req.getKind() == ChangeRequest.Kind.CREATE) {
                 if (taskRepository.existsById(req.getTaskId())) throw new IllegalArgumentException("任务已存在，请勿重复审核");
                 Map<String, Object> after = fromJson(req.getAfterJson());
+                validateApprovedOwners(after);
                 Task task = new Task();
                 task.setId(req.getTaskId());
                 task.setTitle((String) after.get("title"));
@@ -223,6 +238,7 @@ public class TaskService {
                 String previousTitle = task.getTitle();
                 if (req.getKind() == ChangeRequest.Kind.EDIT) {
                     Map<String, Object> after = fromJson(req.getAfterJson());
+                    validateApprovedOwners(after);
                     task.setTitle((String) after.get("title"));
                     task.setDetail((String) after.get("detail"));
                     task.setPriority(Task.Priority.valueOf(((String) after.get("priority")).toUpperCase()));
@@ -241,6 +257,7 @@ public class TaskService {
                     addHistory(task, reviewer.getId(), "任务编辑审核通过");
                 } else {
                     task.setDeleted(true);
+                    pinRepository.deleteByTaskId(task.getId());
                     task.setRevision(task.getRevision() + 1);
                     addHistory(task, reviewer.getId(), "任务删除审核通过，记录归档");
                 }
@@ -294,27 +311,46 @@ public class TaskService {
 
     @Transactional
     public List<String> togglePin(User user, String taskId) {
-        Task task = getTask(taskId);
-        if (!canSeeTask(user, task)) throw new IllegalArgumentException("不能关注无权查看的任务");
+        // Match approval's task-before-user lock order and serialize pinning with archival.
+        Task task = taskRepository.findForUpdate(taskId).orElse(null);
+        userRepository.findForUpdate(user.getId()).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
         Optional<Pin> existing = pinRepository.findByUserIdAndTaskId(user.getId(), taskId);
+        // A stale or hidden focus must still be removable by its owner.
         if (existing.isPresent()) {
             pinRepository.delete(existing.get());
         } else {
-            List<Pin> userPins = pinRepository.findByUserId(user.getId());
-            if (userPins.size() >= 10) throw new IllegalArgumentException("个人重点最多保留 10 项");
+            if (!canSeeTask(user, task)) throw new IllegalArgumentException("不能关注无权查看的任务");
+            List<Pin> valid = new ArrayList<>();
+            for (Pin pin : pinRepository.findByUserId(user.getId())) {
+                if (canSeeTask(user, getTask(pin.getTaskId()))) valid.add(pin);
+                else pinRepository.delete(pin);
+            }
+            if (valid.size() >= 10) throw new IllegalArgumentException("个人重点最多保留 10 项");
             Pin pin = new Pin();
-            pin.setUserId(user.getId());
-            pin.setTaskId(taskId);
+            pin.setUserId(user.getId()); pin.setTaskId(taskId);
             pinRepository.save(pin);
         }
-        return pinRepository.findByUserId(user.getId()).stream().map(Pin::getTaskId).collect(Collectors.toList());
+        return getUserPins(user.getId());
     }
 
     public List<String> getUserPins(String userId) {
-        return pinRepository.findByUserId(userId).stream().map(Pin::getTaskId).collect(Collectors.toList());
+        User user = userRepository.findById(userId).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
+        return pinRepository.findByUserId(userId).stream().map(Pin::getTaskId)
+                .filter(id -> canSeeTask(user, getTask(id))).collect(Collectors.toList());
     }
 
     // ============ 辅助 ============
+
+    private void validateApprovedOwners(Map<String, Object> after) {
+        List<String> owners = (List<String>) after.get("owners");
+        if (owners == null || owners.isEmpty()) throw new IllegalArgumentException("任务缺少负责人，请驳回后重新申请");
+        // Stable lock order prevents disable/account edits racing the approval check.
+        for (String id : owners.stream().distinct().sorted().toList()) {
+            User owner = userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("负责人不存在，请驳回后重新申请"));
+            entityManager.refresh(owner, LockModeType.PESSIMISTIC_WRITE);
+            if (!owner.isOrganizationMember()) throw new IllegalArgumentException("负责人已停用或组织归属已变更，请驳回后重新申请或更换负责人");
+        }
+    }
 
     private Task lockTask(String taskId) {
         return taskRepository.findForUpdate(taskId).filter(t -> !t.getDeleted()).orElse(null);

@@ -9,5 +9,6 @@ import java.util.Optional;
 public interface PinRepository extends JpaRepository<Pin, Long> {
     List<Pin> findByUserId(String userId);
     Optional<Pin> findByUserIdAndTaskId(String userId, String taskId);
+    void deleteByTaskId(String taskId);
     void deleteByUserIdAndTaskId(String userId, String taskId);
 }

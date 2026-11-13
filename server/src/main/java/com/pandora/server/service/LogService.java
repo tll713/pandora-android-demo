@@ -74,6 +74,8 @@ public class LogService {
 
     @Transactional
     public WorkLog saveLog(User author, Map<String, Object> values, String logId) {
+        // The author lock also serializes first writes when no log row exists yet.
+        userRepository.findForUpdate(author.getId()).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
         LocalDate today = LocalDate.now();
         LocalDate earliest = today.minusDays(2);
         String requestedDate = (String) values.get("date");
@@ -88,14 +90,14 @@ public class LogService {
 
         WorkLog existing = null;
         if (logId != null) {
-            existing = workLogRepository.findById(logId).orElse(null);
+            existing = workLogRepository.findForUpdate(logId).orElse(null);
             if (existing == null || !existing.getAuthorId().equals(author.getId())
                     || existing.getDate().isBefore(earliest) || existing.getDate().isAfter(today))
                 throw new IllegalArgumentException("只能编辑本人最近三天的日志");
             if (!existing.getDate().equals(logDate))
                 throw new IllegalArgumentException("不能修改日志日期");
         } else {
-            existing = workLogRepository.findByAuthorIdAndDate(author.getId(), logDate).orElse(null);
+            existing = workLogRepository.findForUpdateByAuthorAndDate(author.getId(), logDate).orElse(null);
         }
 
         String content = (String) values.get("content");
@@ -127,7 +129,7 @@ public class LogService {
             v.setTitle(existing.getTitle());
             v.setContent(existing.getContent());
             v.setTaskId(existing.getTaskId());
-            v.setAt(existing.getUpdatedAt());
+            v.setAt(existing.getUpdatedAt() != null ? existing.getUpdatedAt() : at);
             v.setActorId(existing.getAuthorId());
             existing.getVersions().add(v);
             existing.setTitle(title);

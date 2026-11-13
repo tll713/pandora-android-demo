@@ -35,7 +35,7 @@ class PersonalAccountTest {
     void passwordChangeChecksOldPasswordAndInvalidatesExistingTokens() {
         User user = user();
         AuthService auth = new AuthService(users, encoder, "a-test-secret-with-at-least-32-bytes-long", 3600000);
-        UserService service = new UserService(users, encoder);
+        UserService service = new UserService(users, encoder, mock(jakarta.persistence.EntityManager.class));
         String token = auth.authenticate(user.getName(), "old-pass-123");
         assertEquals(user.getId(), auth.validateToken(token));
         String originalHash = user.getPasswordHash();

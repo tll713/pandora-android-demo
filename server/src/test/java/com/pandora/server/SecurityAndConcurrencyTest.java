@@ -39,6 +39,10 @@ class SecurityAndConcurrencyTest {
     @Autowired AuthService auth;
     @Autowired PasswordEncoder encoder;
     @Autowired JdbcTemplate jdbc;
+    @Autowired UserService accounts;
+    @Autowired WorkLogRepository workLogs;
+    @Autowired PinRepository pins;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
     User admin, founder, employee;
 
     @BeforeEach
@@ -46,15 +50,17 @@ class SecurityAndConcurrencyTest {
         jdbc.execute("ALTER TABLE tasks ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP");
         jdbc.execute("ALTER TABLE work_logs ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP");
         jdbc.execute("ALTER TABLE work_logs ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP");
-        admin = member(User.Role.ADMIN, "部门甲");
-        founder = member(User.Role.FOUNDER, "部门甲");
-        employee = member(User.Role.EMPLOYEE, "部门甲");
+        String department = "部门-" + UUID.randomUUID().toString().substring(0, 8);
+        admin = member(User.Role.ADMIN, department);
+        founder = member(User.Role.FOUNDER, department);
+        employee = member(User.Role.EMPLOYEE, department);
     }
 
     User member(User.Role role, String department) {
         User u = new User();
         u.setId(UUID.randomUUID().toString().replace("-", "").substring(0, 30));
         u.setName(u.getId()); u.setRole(role); u.setDepartment(department);
+        u.setPhone("1" + ThreadLocalRandom.current().nextLong(1000000000L, 9999999999L));
         u.setPasswordHash(encoder.encode("test-pass-123"));
         return users.saveAndFlush(u);
     }
@@ -131,6 +137,155 @@ class SecurityAndConcurrencyTest {
         assertEquals(Task.Status.DONE, saved.getStatus());
         assertNotNull(saved.getCompletedAt());
         assertEquals(1, saved.getHistory().stream().filter(h -> h.getText().contains("标记任务完成")).count());
+    }
+
+    private String avatar() throws Exception {
+        var image = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var bytes = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(image, "jpg", bytes);
+        return "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(bytes.toByteArray());
+    }
+
+    private void disable(User target) {
+        accounts.updateUser(admin, target.getId(), target.getName(), target.getPhone(), null, null,
+                target.getDepartment(), target.getRole().name(), false);
+    }
+
+    @Test
+    void staleAvatarProfileAndPasswordWritesCannotRestoreOldCredentialsOrReenableAccount() throws Exception {
+        String token = auth.authenticate(employee.getName(), "test-pass-123");
+        User stale = users.findById(employee.getId()).orElseThrow();
+        accounts.resetPassword(admin, employee.getId(), "new-password-456");
+        String image = avatar();
+        accounts.updateAvatar(stale, image);
+        accounts.updateProfile(stale, employee.getName(), "男", "11010119900101001X");
+        assertThrows(IllegalArgumentException.class, () -> accounts.changePassword(stale, "test-pass-123", "try-to-restore-789"));
+        User saved = users.findById(employee.getId()).orElseThrow();
+        assertTrue(encoder.matches("new-password-456", saved.getPasswordHash()));
+        assertTrue(saved.getAuthVersion() > stale.getAuthVersion());
+        assertNull(auth.validateToken(token));
+        assertThrows(IllegalArgumentException.class, () -> auth.authenticate(employee.getName(), "test-pass-123"));
+        disable(saved);
+        assertThrows(IllegalArgumentException.class, () -> accounts.updateAvatar(stale, image));
+        assertThrows(IllegalArgumentException.class, () -> accounts.updateProfile(stale, "旧请求", "男", "11010119900101001X"));
+        assertFalse(users.findById(employee.getId()).orElseThrow().isEnabled());
+        assertNull(auth.validateToken(token));
+    }
+
+    @Test
+    void concurrentAvatarAndAccountMaintenanceKeepDisableAndResetEffective() throws Exception {
+        String token = auth.authenticate(employee.getName(), "test-pass-123"), image = avatar();
+        race(() -> accounts.updateAvatar(employee, image), () -> {
+            accounts.resetPassword(admin, employee.getId(), "reset-password-456");
+            disable(employee); return null;
+        });
+        User saved = users.findById(employee.getId()).orElseThrow();
+        assertFalse(saved.isEnabled());
+        assertTrue(encoder.matches("reset-password-456", saved.getPasswordHash()));
+        assertEquals(2, saved.getAuthVersion());
+        assertNull(auth.validateToken(token));
+    }
+
+    @Test
+    void accountEditRefreshesAnAlreadyManagedUserBeforeSaving() throws Exception {
+        String image = avatar();
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(status -> {
+            User cached = users.findById(employee.getId()).orElseThrow();
+            try (var pool = Executors.newSingleThreadExecutor()) {
+                pool.submit(() -> accounts.updateAvatar(employee, image)).get(10, TimeUnit.SECONDS);
+            } catch (Exception e) { throw new RuntimeException(e); }
+            assertNull(cached.getAvatarData(), "simulate an old OSIV entity");
+            accounts.updateUser(admin, employee.getId(), employee.getName(), employee.getPhone(), null, null,
+                    employee.getDepartment(), "EMPLOYEE", true);
+        });
+        assertEquals(image, users.findById(employee.getId()).orElseThrow().getAvatarData());
+    }
+
+    @Test
+    void concurrentLogEditsPreserveBothSavedContentsInVersionHistory() throws Exception {
+        String today = LocalDate.now().toString();
+        WorkLog original = logs.saveLog(employee, Map.of("date", today, "content", "原始日报"), null);
+        List<Boolean> results = race(
+                () -> logs.saveLog(employee, Map.of("date", today, "content", "并发内容甲"), original.getId()),
+                () -> logs.saveLog(employee, Map.of("date", today, "content", "并发内容乙"), original.getId()));
+        assertEquals(List.of(true, true), results);
+        WorkLog saved = workLogs.findById(original.getId()).orElseThrow();
+        Set<String> contents = new HashSet<>(); contents.add(saved.getContent());
+        var versions = jdbc.queryForList("SELECT content FROM log_versions WHERE log_id = ?", String.class, saved.getId());
+        contents.addAll(versions);
+        assertEquals(Set.of("原始日报", "并发内容甲", "并发内容乙"), contents);
+        assertEquals(2, versions.size());
+    }
+
+    @Test
+    void concurrentFirstLogWritesProduceOneDailyLogAndKeepTheOtherVersion() throws Exception {
+        String today = LocalDate.now().toString();
+        assertEquals(List.of(true, true), race(
+                () -> logs.saveLog(employee, Map.of("date", today, "content", "首次内容甲"), null),
+                () -> logs.saveLog(employee, Map.of("date", today, "content", "首次内容乙"), null)));
+        WorkLog saved = workLogs.findByAuthorIdAndDate(employee.getId(), LocalDate.now()).orElseThrow();
+        var versions = jdbc.queryForList("SELECT content FROM log_versions WHERE log_id = ?", String.class, saved.getId());
+        assertEquals(1, versions.size());
+        assertEquals(Set.of("首次内容甲", "首次内容乙"), Set.of(saved.getContent(), versions.getFirst()));
+    }
+
+    @Test
+    void duplicateConcurrentCreateRequestsShareOnePendingRequest() throws Exception {
+        var input = values("双击提交");
+        assertEquals(List.of(true, true), race(
+                () -> service.requestTaskChange(employee, "create", input, null),
+                () -> service.requestTaskChange(employee, "create", input, null)));
+        var pending = requests.findByProposerId(employee.getId()).stream()
+                .filter(r -> r.getStatus() == ChangeRequest.Status.PENDING).toList();
+        assertEquals(1, pending.size());
+        service.reviewTaskChange(admin, pending.getFirst().getId(), true, "");
+        assertTrue(tasks.existsById(pending.getFirst().getTaskId()));
+    }
+
+    @Test
+    void archivedPinsAreRemovedAndLegacyInvalidPinsDoNotConsumeTheQuota() {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 11; i++) ids.add(createTask());
+        for (int i = 0; i < 10; i++) service.togglePin(employee, ids.get(i));
+        ChangeRequest deletion = service.requestTaskChange(admin, "delete", null, ids.getFirst());
+        service.reviewTaskChange(founder, deletion.getId(), true, "");
+        assertTrue(pins.findByUserIdAndTaskId(employee.getId(), ids.getFirst()).isEmpty());
+        assertEquals(9, service.getUserPins(employee.getId()).size());
+        Pin stale = new Pin(); stale.setUserId(employee.getId()); stale.setTaskId(ids.getFirst()); pins.saveAndFlush(stale);
+        assertEquals(9, service.togglePin(employee, ids.getFirst()).size(), "an unavailable task can still be unpinned");
+        Pin legacy = new Pin(); legacy.setUserId(employee.getId()); legacy.setTaskId(ids.getFirst()); pins.saveAndFlush(legacy);
+        assertEquals(10, service.togglePin(employee, ids.getLast()).size());
+        assertTrue(pins.findByUserIdAndTaskId(employee.getId(), ids.getFirst()).isEmpty());
+    }
+
+    @Test
+    void disabledOwnerBlocksCreateAndEditApprovalButAllowsRejection() {
+        ChangeRequest creation = service.requestTaskChange(admin, "create", values("待审批创建"), null);
+        disable(employee);
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(founder, creation.getId(), true, ""));
+        assertFalse(tasks.existsById(creation.getTaskId()));
+        assertEquals(ChangeRequest.Status.PENDING, requests.findById(creation.getId()).orElseThrow().getStatus());
+        service.reviewTaskChange(founder, creation.getId(), false, "负责人已停用，请更换");
+        accounts.updateUser(admin, employee.getId(), employee.getName(), employee.getPhone(), null, null,
+                employee.getDepartment(), "EMPLOYEE", true);
+        String id = createTask();
+        ChangeRequest edit = service.requestTaskChange(admin, "edit", values("待审批修改"), id);
+        disable(employee);
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(founder, edit.getId(), true, ""));
+        assertEquals("并发任务", tasks.findById(id).orElseThrow().getTitle());
+        service.reviewTaskChange(founder, edit.getId(), false, "更换负责人后重新申请");
+    }
+
+    @Test
+    void concurrentPinAndArchiveCannotLeaveAnArchivedPin() throws Exception {
+        String id = createTask();
+        ChangeRequest deletion = service.requestTaskChange(admin, "delete", null, id);
+        race(() -> service.togglePin(employee, id),
+                () -> service.reviewTaskChange(founder, deletion.getId(), true, ""));
+        assertTrue(tasks.findById(id).orElseThrow().getDeleted());
+        assertTrue(pins.findByUserIdAndTaskId(employee.getId(), id).isEmpty());
+        assertTrue(service.getUserPins(employee.getId()).isEmpty());
     }
 
     private List<Boolean> race(Callable<?> first, Callable<?> second) throws Exception {
