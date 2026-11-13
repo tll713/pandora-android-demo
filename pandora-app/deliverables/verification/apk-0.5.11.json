@@ -1,0 +1,25 @@
+{
+  "apk": "pandora-demo-0.5.11.apk",
+  "version": "0.5.11",
+  "versionCode": 45,
+  "sha256": "c29e3be6de411c23784d838c3a51d6c7293013c3d02b59eaac6d58c68bd74727",
+  "bytes": 82810,
+  "signerSha256": "6520cc6e961fe34caaf4a0d2cc4b4736ce2a000db4768a3e1aa14faddbd2499e",
+  "sameSignerAs": "pandora-demo-0.5.10.apk",
+  "embeddedAssetsMatchSource": [
+    "index.html",
+    "favicon.svg",
+    "src/app.js",
+    "src/domain.js",
+    "src/style.css",
+    "src/mobile.css"
+  ],
+  "apiBase": "http://10.17.147.160:8080/api",
+  "servedCopyMatches": true,
+  "physicalDeviceTested": false,
+  "httpDownloadVerified": false,
+  "backendListening": false,
+  "httpDownloadCheck": "Not tested. Start the latest backend with start.cmd before downloading or using the app.",
+  "domainTestsPassed": 21,
+  "sourceSyntaxCheckPassed": true
+}
