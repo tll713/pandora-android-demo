@@ -288,6 +288,120 @@ class SecurityAndConcurrencyTest {
         assertTrue(service.getUserPins(employee.getId()).isEmpty());
     }
 
+    @Test
+    void selectedReviewersMustAllApproveAndCannotRepeatOrBeReplaced() {
+        User other = member(User.Role.ADMIN, "审核部");
+        ChangeRequest r = service.requestTaskChange(employee, "create", values("会签创建"), null,
+                List.of(admin.getId(), founder.getId(), admin.getId()));
+        assertEquals(2, service.reviewers(r).size());
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(other, r.getId(), true, ""));
+        ChangeRequest partial = service.reviewTaskChange(admin, r.getId(), true, "已核对");
+        assertEquals(ChangeRequest.Status.PENDING, partial.getStatus());
+        assertEquals(1, service.reviews(partial).size());
+        assertFalse(tasks.existsById(r.getTaskId()));
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(admin, r.getId(), true, "重复"));
+        assertEquals(ChangeRequest.Status.APPROVED, service.reviewTaskChange(founder, r.getId(), true, "同意").getStatus());
+        assertTrue(tasks.existsById(r.getTaskId()));
+        assertEquals(2, service.reviews(requests.findById(r.getId()).orElseThrow()).size());
+    }
+
+    @Test
+    void invalidReviewerListsAreRejectedAndLegacyRequestsRemainReviewable() {
+        User disabled = member(User.Role.ADMIN, "已停用");
+        disabled.setEnabled(false); users.saveAndFlush(disabled);
+        for (Object selection : List.of(List.of(), List.of(employee.getId()), List.of(disabled.getId()),
+                List.of("missing"), "admin", List.of(123))) {
+            assertThrows(IllegalArgumentException.class, () -> service.requestTaskChange(employee, "create", values("非法"), null, selection));
+        }
+        assertThrows(IllegalArgumentException.class, () -> service.requestTaskChange(admin, "create", values("自审"), null, List.of(admin.getId())));
+        ChangeRequest legacy = service.requestTaskChange(admin, "create", values("旧版兼容"), null);
+        legacy.setReviewersJson(null); legacy.setReviewsJson(null); requests.saveAndFlush(legacy);
+        assertEquals(ChangeRequest.Status.APPROVED, service.reviewTaskChange(founder, legacy.getId(), true, "").getStatus());
+    }
+
+    @Test
+    void rejectionEndsMultiReviewerDeletionWithoutChangingTask() {
+        String id = createTask();
+        User other = member(User.Role.ADMIN, "审核部");
+        ChangeRequest r = service.requestTaskChange(admin, "delete", null, id, List.of(founder.getId(), other.getId()));
+        service.reviewTaskChange(founder, r.getId(), true, "同意归档");
+        assertFalse(tasks.findById(id).orElseThrow().getDeleted());
+        assertEquals(ChangeRequest.Status.REJECTED, service.reviewTaskChange(other, r.getId(), false, "继续执行").getStatus());
+        assertFalse(tasks.findById(id).orElseThrow().getDeleted());
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(founder, r.getId(), true, ""));
+    }
+
+    @Test
+    void concurrentSelectedApprovalsApplyExactlyOnce() throws Exception {
+        ChangeRequest r = service.requestTaskChange(employee, "create", values("并发会签"), null, List.of(admin.getId(), founder.getId()));
+        assertEquals(List.of(true,true), race(() -> service.reviewTaskChange(admin, r.getId(), true, ""),
+                () -> service.reviewTaskChange(founder, r.getId(), true, "")));
+        ChangeRequest saved = requests.findById(r.getId()).orElseThrow();
+        assertEquals(ChangeRequest.Status.APPROVED, saved.getStatus());
+        assertEquals(2, service.reviews(saved).size());
+        assertEquals(1, tasks.findById(r.getTaskId()).orElseThrow().getRevision());
+    }
+
+    @Test
+    void failedFinalApprovalRollsBackOnlyThatReviewAndAllowsRejection() {
+        ChangeRequest r = service.requestTaskChange(employee, "create", values("会签回滚"), null, List.of(admin.getId(), founder.getId()));
+        service.reviewTaskChange(admin, r.getId(), true, "已通过");
+        disable(employee);
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(founder, r.getId(), true, ""));
+        ChangeRequest saved = requests.findById(r.getId()).orElseThrow();
+        assertEquals(ChangeRequest.Status.PENDING, saved.getStatus());
+        assertEquals(1, service.reviews(saved).size());
+        assertTrue(service.canReviewRequest(founder, saved));
+        service.reviewTaskChange(founder, r.getId(), false, "负责人已停用");
+        assertFalse(tasks.existsById(r.getTaskId()));
+    }
+
+    @Test
+    void reviewerSelectionAndProgressAreAvailableThroughApi() throws Exception {
+        String token = auth.authenticate(employee.getName(), "test-pass-123");
+        mvc.perform(get("/api/workspace").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.db.allowedReviewers").isArray());
+        var body = Map.of("kind", "create", "values", values("接口会签"), "reviewers", List.of(admin.getId(), founder.getId()));
+        var response = mvc.perform(post("/api/tasks/requests").header("Authorization", "Bearer " + token)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.reviewers.length()").value(2)).andReturn();
+        String id = json.readTree(response.getResponse().getContentAsString()).get("id").asText();
+        String reviewerToken = auth.authenticate(admin.getName(), "test-pass-123");
+        mvc.perform(post("/api/tasks/requests/" + id + "/review").header("Authorization", "Bearer " + reviewerToken)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"approve\":true,\"reason\":\"已核对\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("pending"))
+            .andExpect(jsonPath("$.reviews[0].reviewer").value(admin.getId()));
+        mvc.perform(post("/api/tasks/requests").header("Authorization", "Bearer " + token)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"kind\":\"create\",\"reviewers\":null}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void ordinaryMembersAcrossDepartmentsCanReviewAssignedRequestsOnly() throws Exception {
+        User colleague = member(User.Role.EMPLOYEE, "其他部门");
+        User unrelated = member(User.Role.EMPLOYEE, "无关部门");
+        assertTrue(service.getAllowedReviewers(admin).stream().anyMatch(u -> u.getId().equals(colleague.getId())));
+        ChangeRequest r = service.requestTaskChange(admin, "create", values("成员会签"), null,
+                List.of(employee.getId(), colleague.getId()));
+        ChangeRequest hidden = service.requestTaskChange(admin, "create", values("其他指定申请"), null,
+                List.of(founder.getId()));
+        assertTrue(service.getVisibleRequests(employee).stream().anyMatch(v -> v.getId().equals(r.getId())));
+        assertFalse(service.getVisibleRequests(employee).stream().anyMatch(v -> v.getId().equals(hidden.getId())));
+        assertFalse(service.getVisibleRequests(unrelated).stream().anyMatch(v -> v.getId().equals(r.getId())));
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(unrelated, r.getId(), true, ""));
+        String employeeToken = auth.authenticate(employee.getName(), "test-pass-123");
+        mvc.perform(post("/api/tasks/requests/" + r.getId() + "/review").header("Authorization", "Bearer " + employeeToken)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"approve\":true,\"reason\":\"同意\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("pending"));
+        assertFalse(tasks.existsById(r.getTaskId()));
+        service.reviewTaskChange(colleague, r.getId(), true, "跨部门核对通过");
+        assertTrue(tasks.existsById(r.getTaskId()));
+        assertTrue(service.getVisibleRequests(colleague).stream().anyMatch(v -> v.getId().equals(r.getId())));
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(employee, hidden.getId(), true, ""));
+        ChangeRequest legacy = service.requestTaskChange(admin, "create", values("未指定申请"), null);
+        assertFalse(service.canReviewRequest(employee, legacy));
+    }
+
     private List<Boolean> race(Callable<?> first, Callable<?> second) throws Exception {
         CyclicBarrier start = new CyclicBarrier(2);
         try (var pool = Executors.newFixedThreadPool(2)) {

@@ -74,6 +74,53 @@ class AdminWorkflowTest {
     }
 
     @Test
+    void todoColorPersistsAndOnlyItsOwnerCanChangeIt() throws Exception {
+        String date = java.time.LocalDate.now().toString();
+        JsonNode todo = call("POST", "/api/todos", employee, Map.of("date", date, "title", "需求复核", "color", "#5C7FA3"));
+        assertEquals("#5c7fa3", todo.get("color").asText());
+        String path = "/api/todos/" + todo.get("id").asText() + "/color";
+        mvc.perform(put(path).contentType(MediaType.APPLICATION_JSON).content("{\"color\":\"#b27368\"}"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(put(path).header("Authorization", "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"color\":\"#b27368\"}"))
+                .andExpect(status().isBadRequest());
+        for (String color : new String[]{"red", "#fff", "<script>"}) {
+            mvc.perform(put(path).header("Authorization", "Bearer " + employee)
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("color", color))))
+                    .andExpect(status().isBadRequest());
+        }
+        call("POST", "/api/todos/" + todo.get("id").asText() + "/toggle", employee, null);
+        JsonNode saved = call("PUT", path, employee, Map.of("color", "#b27368"));
+        assertEquals("#b27368", saved.get("color").asText());
+        assertTrue(saved.get("done").asBoolean());
+        assertEquals(date, saved.get("date").asText());
+        assertEquals("需求复核", saved.get("title").asText());
+        assertTrue(call("GET", "/api/workspace", employee, null).get("db").get("todos").findValuesAsText("color").contains("#b27368"));
+        JsonNode defaultTodo = call("POST", "/api/todos", employee, Map.of("date", date, "title", "默认配色"));
+        assertEquals("#567c73", defaultTodo.get("color").asText());
+    }
+
+    @Test
+    void directorySharesContactDetailsWithoutIdentityNumbersAndOmitsDisabledAccounts() throws Exception {
+        User colleague = new User(); colleague.setId("directory-colleague"); colleague.setName("通讯录成员");
+        colleague.setDepartment("另一部门"); colleague.setRole(User.Role.EMPLOYEE);
+        colleague.setPhone("13800138009"); colleague.setIdNumber("11010119900101001X");
+        colleague.setPasswordHash(encoder.encode("test-pass-123"));
+        users.saveAndFlush(colleague);
+        User disabled = new User(); disabled.setId("directory-disabled"); disabled.setName("停用联系人");
+        disabled.setDepartment("另一部门"); disabled.setRole(User.Role.EMPLOYEE); disabled.setEnabled(false);
+        disabled.setPasswordHash(encoder.encode("test-pass-123")); users.saveAndFlush(disabled);
+        mvc.perform(get("/api/directory")).andExpect(status().isUnauthorized());
+        JsonNode directory = call("GET", "/api/directory", employee, null);
+        assertTrue(directory.findValuesAsText("phone").contains("13800138009"));
+        assertTrue(directory.findValuesAsText("id").contains("directory-colleague"));
+        assertFalse(directory.findValuesAsText("id").contains("directory-disabled"));
+        assertTrue(directory.findValues("idNumber").isEmpty());
+        assertTrue(directory.findValues("passwordHash").isEmpty());
+        assertTrue(call("GET", "/api/workspace", employee, null).get("db").get("members").findValues("phone").isEmpty());
+    }
+
+    @Test
     void todoReschedulingPersistsAndRejectsOtherOwnersAndInvalidDates() throws Exception {
         var currentDay = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai"));
         String today = currentDay.toString();

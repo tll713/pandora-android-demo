@@ -1,5 +1,6 @@
 tmp/
 node_modules/
+/output/playwright/
 .env
 .env.*
 !.env.example

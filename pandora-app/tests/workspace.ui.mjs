@@ -26,6 +26,7 @@ await page.route('**/api/**',async route => {
   const req = route.request(), url = new URL(req.url());
   const respond = (body,status=200) => route.fulfill({status,json:body});
   if(url.pathname.endsWith('/workspace')) return respond({user:current,db});
+  if(url.pathname.endsWith('/directory')) return respond(members);
   if(url.pathname.endsWith('/tags')) return respond(tags);
   if(url.pathname.endsWith('/logs/history')) { historyCalls++; return failHistory ? respond({error:'历史日志加载失败，请重试'},500) : respond([{id:'old-log',author:'lin',date:'2026-11-01',title:'历史日报',content:'完成历史工作',versions:[]}]); }
   if(url.pathname.endsWith('/logs') && req.method()==='POST') {
@@ -182,32 +183,20 @@ try {
   await page.reload(); await openMessages(); assert.equal(await page.locator('.message-badge').innerText(),'1');
   await close();
   await go('logs');
-  await page.locator('[name="department"]').selectOption('产品设计部');
-  assert.match(await page.locator('.log-submission').innerText(),/1 \/ 2/);
-  await page.locator('[name="submission"]').selectOption('missing');
-  assert.match(await page.locator('.log-results').innerText(),/周一鸣/);
-  assert.doesNotMatch(await page.locator('.log-results').innerText(),/陈嘉宁|系统管理员/);
-  await page.locator('[data-action="clear-log-filters"]').click();
-  assert.equal(await page.locator('.log-filter [name="tag"], .log-filter [name="task"]').count(),0);
-  await page.locator('[name="department"]').selectOption('产品设计部');
-  await page.locator('[name="author"]').selectOption('lin');
-  await page.locator('[name="role"]').selectOption('TEAM_LEAD');
-  assert.equal(await page.locator('[name="author"]').inputValue(),'');
-  assert.deepEqual(await page.locator('[name="author"] option').evaluateAll(els => els.map(el => el.value)),['','zhou']);
-  assert.equal(await page.locator('.log-results .log-card').count(),0);
-  assert.match(await page.locator('.log-submission').innerText(),/0 \/ 1/);
-  await page.locator('[name="role"]').selectOption('EMPLOYEE');
-  assert.deepEqual(await page.locator('[name="author"] option').evaluateAll(els => els.map(el => el.value)),['','lin']);
-  await page.locator('[data-action="clear-log-filters"]').click();
+  assert.equal(await page.locator('.log-results .log-card').count(),0,'admin logs page excludes others');
+  assert.equal(await page.locator('[name=department],[name=role],[name=author],[name=submission]').count(),0);
   failHistory=true; await page.locator('[data-log-range="all"]').click();
   await page.locator('[data-action="retry-log-history"]').waitFor(); failHistory=false;
   await page.locator('[data-action="retry-log-history"]').click();
   await page.locator('[data-action="retry-log-history"]').waitFor({state:'detached'}); assert.equal(historyCalls,2);
-  await page.locator('[name="checkDate"]').fill('2026-11-01');
-  await page.locator('[name="submission"]').selectOption('submitted');
-  assert.equal(await page.locator('.log-results .log-card').count(),1);
-  assert.match(await page.locator('.log-results').innerText(),/历史日报/);
-  await page.locator('[data-action="clear-log-filters"]').click();
+  assert.equal(await page.locator('.log-results .log-card').count(),0,'loading history keeps the page personal');
+  await go('calendar'); await page.locator('[data-task-view=directory]').click();
+  await page.locator('[data-action=directory-member][data-id=lin]').click();
+  await page.locator('[data-action=directory-tab][data-id=logs]').click();
+  await page.getByRole('button',{name:'历史日报',exact:true}).waitFor();
+  await page.locator('[data-action=log][data-id=l1]').click();
+  assert.equal(await page.locator('[data-form=log-comment]').count(),1);
+  await close(); await go('logs');
   await page.locator('[data-action="new-log"]').click(); await page.locator('[data-action="new-log-date"]').first().click();
   await page.locator('[name="content"]').fill('完成需求评审'); await page.locator('[name="plan"]').fill('推进设计'); await page.locator('[name="issues"]').fill('需要资源支持');
   await page.getByRole('button',{name:'保存日志',exact:true}).click();
@@ -230,22 +219,15 @@ try {
   members.push(departmentManager); current=departmentManager;
   await page.reload(); await go('logs');
   assert.equal(await page.locator('.log-filter [name="department"]').count(),0);
-  assert.equal(await page.locator('.log-filter [name="role"]').count(),1);
-  assert.equal(await page.locator('.log-filter [name="author"]').count(),1);
-  assert.match(await page.locator('h1').innerText(),/本部门工作日志/);
-  assert.deepEqual(await page.locator('[name="author"] option').evaluateAll(els=>els.map(el=>el.value)),['','lin','zhou','manager']);
-  await page.locator('[name="submission"]').selectOption('submitted');
-  assert.equal(await page.locator('.log-results .log-card').count(),1);
-  assert.match(await page.locator('.log-results').innerText(),/产品交付/);
-  await page.locator('[name="submission"]').selectOption('missing');
-  assert.doesNotMatch(await page.locator('.log-results').innerText(),/林予安|陈嘉宁/);
-  assert.match(await page.locator('.log-results').innerText(),/周一鸣/);
+  assert.equal(await page.locator('.log-filter [name="role"],.log-filter [name="author"]').count(),0);
+  assert.equal(await page.locator('h1').innerText(),'我的日志');
+  assert.equal(await page.locator('.log-results .log-card').count(),0);
   await page.screenshot({path:'output/playwright/log-department-manager.png',fullPage:true});
 
   current=members[1]; await page.reload(); await go('logs');
   assert.equal(await page.locator('[name="department"]').count(),0);
   assert.equal(await page.locator('.log-results .log-card').count(),1);
-  await openMessages(); assert.equal(await page.locator('[data-message-filter="review"]').count(),0);
+  await openMessages(); assert.equal(await page.locator('[data-message-filter="review"]').count(),1);
   await page.locator('[data-action="messages-read"]').click();
   await page.locator('[data-message-filter="unread"]').click();
   assert.equal(await page.locator('.message-item').count(),0);
@@ -253,5 +235,5 @@ try {
   assert.equal(await page.evaluate(() => window.pandoraBack()),true);
   assert.equal(await page.locator('#modal').evaluate(el => el.open),false);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:true,checks:['four navigation tabs and home message button','message dialog, return, Escape and Android back','completed board tasks hidden','todo month drag and persisted rescheduling','three calendar tasks with +N expansion','task tags and colored picker','message review, unread counts and empty state','organization and missing-report filters','history failure and retry','structured reports','employee visibility','responsive layout at 390/768/1280'],moves},null,2));
+  console.log(JSON.stringify({passed:true,checks:['four navigation tabs and home message button','message dialog, return, Escape and Android back','completed board tasks hidden','todo month drag and persisted rescheduling','three calendar tasks with +N expansion','task tags and colored picker','message review, unread counts and empty state','personal logs and directory comments','history failure and retry','structured reports','employee visibility','responsive layout at 390/768/1280'],moves},null,2));
 } finally { await browser.close(); }

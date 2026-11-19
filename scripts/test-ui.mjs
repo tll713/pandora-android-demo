@@ -14,7 +14,7 @@ try {
     });
   }
   for (const script of ['tests/ui.smoke.mjs','tests/ui.layout.smoke.mjs','tests/calendar.ui.mjs','tests/calendar-auto.ui.mjs','tests/personal.ui.mjs',
-    'tests/workspace.ui.mjs','tests/task-tags.ui.mjs','tests/mobile-details.ui.mjs','tests/scheduling.ui.mjs','tests/todo-sync.ui.mjs','tests/session.ui.mjs','tests/reliability.ui.mjs','../web-admin/tests/admin.ui.mjs']) {
+    'tests/workspace.ui.mjs','tests/task-tags.ui.mjs','tests/mobile-details.ui.mjs','tests/scheduling.ui.mjs','tests/todo-sync.ui.mjs','tests/session.ui.mjs','tests/reliability.ui.mjs','tests/directory.ui.mjs','tests/reviewers.ui.mjs','../web-admin/tests/admin.ui.mjs']) {
     console.log('\nRunning '+script);
     const code = await new Promise((resolve,reject)=> {
       const child=spawn(process.execPath,[script],{cwd:app,stdio:'inherit'});

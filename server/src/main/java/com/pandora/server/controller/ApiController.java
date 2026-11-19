@@ -178,6 +178,7 @@ public class ApiController {
         db.put("pins", Map.of(user.getId(), pins));
         db.put("members", visibleUsers.stream().map(this::userToMap).collect(Collectors.toList()));
         db.put("allowedAssignees", allowedAssignees.stream().map(this::userToMap).collect(Collectors.toList()));
+        db.put("allowedReviewers", taskService.getAllowedReviewers(user).stream().map(this::userToMap).collect(Collectors.toList()));
         db.put("tags", tagRepository.findAll().stream().map(this::tagToMap).collect(Collectors.toList()));
         db.put("todos", todoService.listOwn(user.getId()).stream().map(this::todoToMap).collect(Collectors.toList()));
 
@@ -185,6 +186,17 @@ public class ApiController {
             "user", profileToMap(user),
             "db", db
         ));
+    }
+
+    @GetMapping("/directory")
+    public ResponseEntity<?> directory(@AuthenticationPrincipal UserDetails ud) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        return ResponseEntity.ok(userRepository.findAll().stream().filter(User::isEnabled).map(member -> {
+            Map<String, Object> contact = userToMap(member);
+            contact.put("phone", member.getPhone());
+            contact.put("avatarData", member.getAvatarData());
+            return contact;
+        }).collect(Collectors.toList()));
     }
 
     // ============ 每日事项 ============
@@ -195,6 +207,19 @@ public class ApiController {
         try {
             DailyTodo todo = todoService.save(ud.getUsername(), body);
             audit(userRepository.findById(ud.getUsername()).orElse(null), "新增每日事项", todo.getTitle(), "日期 " + todo.getDate());
+            return ResponseEntity.ok(todoToMap(todo));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/todos/{id}/color")
+    public ResponseEntity<?> updateTodoColor(@AuthenticationPrincipal UserDetails ud, @PathVariable String id,
+                                              @RequestBody Map<String, Object> body) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        try {
+            DailyTodo todo = todoService.updateColor(ud.getUsername(), id, body.get("color"));
+            audit(userRepository.findById(ud.getUsername()).orElse(null), "修改事项颜色", todo.getTitle(), todo.getColor());
             return ResponseEntity.ok(todoToMap(todo));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -256,6 +281,7 @@ public class ApiController {
         map.put("date", todo.getDate().toString());
         map.put("title", todo.getTitle());
         map.put("done", todo.isDone());
+        map.put("color", todo.getColor() == null ? "#567c73" : todo.getColor());
         map.put("moveToken", todo.getMoveToken());
         return map;
     }
@@ -271,7 +297,8 @@ public class ApiController {
         String taskId = (String) body.get("taskId");
         Map<String, Object> values = (Map<String, Object>) body.get("values");
         try {
-            ChangeRequest req = taskService.requestTaskChange(user, kind, values, taskId);
+            if (body.containsKey("reviewers") && body.get("reviewers") == null) throw new IllegalArgumentException("请选择审核人");
+            ChangeRequest req = taskService.requestTaskChange(user, kind, values, taskId, body.get("reviewers"));
             audit(user, "提交任务申请", text(values == null ? null : values.get("title")),
                     Map.of("create", "申请创建任务", "edit", "申请编辑任务", "delete", "申请删除任务").getOrDefault(kind, "提交任务变更"));
             return ResponseEntity.ok(requestToMap(req));
@@ -291,7 +318,7 @@ public class ApiController {
         try {
             ChangeRequest req = taskService.reviewTaskChange(user, id, approve, reason);
             audit(user, approve ? "通过任务申请" : "驳回任务申请", text(req.getTaskId()),
-                    approve ? "审核通过" : "审核驳回" + (reason == null || reason.isBlank() ? "" : "：" + reason));
+                    approve ? (req.getStatus() == ChangeRequest.Status.PENDING ? "本次通过，等待其他审核人" : "审核通过") : "审核驳回" + (reason == null || reason.isBlank() ? "" : "：" + reason));
             return ResponseEntity.ok(requestToMap(req));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -611,6 +638,8 @@ public class ApiController {
         m.put("expectedRevision", r.getExpectedRevision());
         m.put("reason", r.getReason());
         m.put("reviewer", r.getReviewerId());
+        m.put("reviewers", taskService.reviewers(r));
+        m.put("reviews", taskService.reviews(r));
         m.put("reviewerName", r.getReviewerId() != null
                 ? userRepository.findById(r.getReviewerId()).map(User::getName).orElse(r.getReviewerId()) : null);
         m.put("createdAt", r.getCreatedAt().toString());

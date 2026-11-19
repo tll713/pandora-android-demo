@@ -21,6 +21,9 @@ public class DailyTodo {
     @Column(nullable = false, length = 120)
     private String title;
 
+    @Column(length = 7)
+    private String color = "#567c73";
+
     @Column(nullable = false)
     private boolean done;
 
@@ -45,6 +48,8 @@ public class DailyTodo {
     public void setDate(LocalDate date) { this.date = date; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
+    public String getColor() { return color; }
+    public void setColor(String color) { this.color = color; }
     public boolean isDone() { return done; }
     public void setDone(boolean done) { this.done = done; }
     public LocalDate getPreviousDate() { return previousDate; }

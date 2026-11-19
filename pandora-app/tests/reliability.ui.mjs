@@ -24,10 +24,10 @@ await page.clock.setFixedTime(new Date('2026-11-13T12:00:00+08:00'));
 const members=[{id:'admin',name:'管理员',role:'ADMIN',department:'管理部'},
   {id:'lin',name:'林予安',role:'EMPLOYEE',department:'研发部'}];
 const recent={id:'recent',author:'lin',date:'2026-11-13',title:'今日日报',content:'今日工作',versions:[{title:'原版',content:'修改前内容',at:'2026-11-13T09:00'}]};
-const history={id:'old',author:'lin',date:'2026-11-01',title:'历史日报',content:'历史工作',versions:[]};
+const history={id:'old',author:'admin',date:'2026-11-01',title:'历史日报',content:'历史工作',versions:[]};
 const tasks=[{id:'one',title:'发布甲',detail:'核对版本',owners:['admin'],creator:'admin',status:'doing',priority:'medium',startAt:'2026-11-13T09:00',dueAt:'2026-11-13T18:00',history:[]},
-  {id:'two',title:'设计乙',detail:'补充说明',owners:['lin'],creator:'admin',status:'todo',priority:'low',startAt:'2026-11-13T09:00',dueAt:'2026-11-13T18:00',history:[]}];
-const db={members,allowedAssignees:members,tasks,tags:[],todos:[],logs:[recent],requests:[],highlights:[],notifications:[],pins:{}};
+  {id:'two',title:'设计乙',detail:'补充说明',owners:['lin','admin'],creator:'admin',status:'todo',priority:'low',startAt:'2026-11-13T09:00',dueAt:'2026-11-13T18:00',history:[]}];
+const db={allowedReviewers:[{id:"reviewer",name:"审核人",department:"管理中心",role:"FOUNDER",roleName:"创始人"}],members,allowedAssignees:members,tasks,tags:[],todos:[],logs:[recent,{...recent,id:'personal',author:'admin'}],requests:[],highlights:[],notifications:[],pins:{}};
 let holdWorkspace=false,workspaceReply,historyReply,commentReply,submitReply,historyCalls=0,submissions=0;
 await page.route('**/api/**',async route=>{
   const req=route.request(),url=new URL(req.url()),send=(json,status=200)=>route.fulfill({json,status});
@@ -41,6 +41,7 @@ await page.route('**/api/**',async route=>{
   if(url.pathname.endsWith('/tasks/requests')&&req.method()==='POST') {
     submissions++;submitReply=(status=200)=>send(status===200?{id:'request'}:{error:'请重试'},status);return;
   }
+  if(url.pathname.endsWith('/directory')) return send(members);
   if(url.pathname.endsWith('/tags')) return send([]);
   if(url.pathname.endsWith('/calendar/metadata')) return send({year:Number(url.searchParams.get('year')),published:false,holidays:{},solarTerms:{}});
   return send({error:'Unexpected '+url.pathname},404);
@@ -77,6 +78,9 @@ try {
   await historyReply();await page.getByRole('button',{name:'历史日报',exact:true}).waitFor();historyReply=null;
   checks.push('首次历史加载与后台刷新按两种完成顺序交错，历史日志均保留');
 
+  await go('calendar'); await page.locator('[data-task-view=directory]').click();
+  await page.locator('[data-action=directory-member][data-id=lin]').click();
+  await page.locator('[data-action=directory-tab][data-id=logs]').click();
   await page.locator('[data-action=log][data-id=recent]').click();await until(()=>commentReply);
   const field=page.locator('[data-form=log-comment] textarea');
   await field.fill('评论草稿');await field.evaluate(el=>{window.commentField=el;el.focus();el.setSelectionRange(1,3);});

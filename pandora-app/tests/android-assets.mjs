@@ -10,7 +10,7 @@ export async function serveAndroid(context, api, broken = false) {
   const parts = source.match(/String csp = ("[^"\r\n]*") \+ apiOrigin\(\) \+ ("[^"\r\n]*");/);
   assert.ok(parts, 'Android CSP must derive its API origin from the build configuration');
   const policy = JSON.parse(parts[1]) + (broken ? 'https://blocked.invalid' : new URL(api).origin) + JSON.parse(parts[2]);
-  const allowed = new Set(['index.html','favicon.svg','src/app.js','src/domain.js','src/style.css','src/mobile.css']);
+  const allowed = new Set(['index.html','favicon.svg','src/app.js','src/domain.js', 'src/date-picker.js','src/style.css','src/mobile.css']);
   // Only APK assets are intercepted. Every API request reaches the actual backend.
   await context.route('https://appassets.androidplatform.net/**', async route => {
     const file = new URL(route.request().url()).pathname.slice(1) || 'index.html';

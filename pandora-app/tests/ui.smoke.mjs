@@ -21,7 +21,7 @@ await page.route('**/api/**',async route=>{
     if(endpoint==='/workspace') return send({user:actor,db:{...db,tasks:visibleTasks(db,actor),logs:visibleLogs(db,actor),members:USERS,
       requests:visibleRequests(db,actor),allowedAssignees:allowedAssignees(actor)}});
     if(endpoint==='/tags') return send([]);
-    if(endpoint==='/tasks/requests') return send(requestTaskChange(db,actor,body.kind,body.values,body.taskId,now));
+    if(endpoint==='/tasks/requests') return send(requestTaskChange(db,actor,body.kind,body.values,body.taskId,now,body.reviewers));
     if(endpoint.endsWith('/review')) return send(reviewTaskChange(db,actor,endpoint.split('/')[3],body.approve,body.reason,now));
     if(endpoint.endsWith('/progress')) return send(updateTaskDetail(db,actor,endpoint.split('/')[2],body.text,now));
     if(endpoint.endsWith('/complete')) return send(completeTask(db,actor,endpoint.split('/')[2],now));
@@ -49,6 +49,7 @@ try {
   assert.equal(await page.locator('[name="owners"]').inputValue(),'lin');
   await page.locator('[name="title"]').fill('员工自行创建任务');
   await page.locator('[name="detail"]').fill('独立审核、记录进展与直接完成');
+  await page.locator('[data-reviewer-query]').fill('许文清');await page.locator('[data-reviewer-person][value=founder]').check();
   await page.getByRole('button',{name:'提交创建申请',exact:true}).click();await modalClosed();
   const req=db.requests.find(r=>r.after?.title==='员工自行创建任务'), taskId=req.taskId;
   assert.equal(db.tasks.some(t=>t.id===taskId),false);
@@ -66,8 +67,9 @@ try {
   await action('task',taskId);await action('complete',taskId);await action('confirm-complete',taskId);await modalClosed();
   assert.equal(db.tasks.find(t=>t.id===taskId).status,'done');assert.equal(db.requests.length,1);
   checks.push('管理员在 app 审核；本人可记录进展、直接完成，无管理权限按钮');
-  await login('manager');await list();await action('task',taskId);await action('edit-task',taskId);
+  await login('manager');await go('calendar');await page.locator('[data-task-view=calendar]').click();await page.locator('.calendar-mode-tabs [data-mode=week]').click();await action('task',taskId);await action('edit-task',taskId);
   await page.locator('[name="title"]').fill('修改后的员工任务');
+  await page.locator('[data-reviewer-query]').fill('许文清');await page.locator('[data-reviewer-person][value=founder]').check();
   await page.getByRole('button',{name:'提交修改申请',exact:true}).click();await modalClosed();
   assert.equal(db.tasks.find(t=>t.id===taskId).title,'员工自行创建任务');
   const edit=db.requests.find(r=>r.kind==='edit');
@@ -75,7 +77,7 @@ try {
   await page.getByRole('button',{name:'审核通过',exact:true}).click();await page.locator('.messages-dialog').waitFor();await page.locator('[data-close]').click();
   assert.equal(db.tasks.find(t=>t.id===taskId).title,'修改后的员工任务');assert.equal(db.tasks.find(t=>t.id===taskId).status,'done');
   checks.push('管理范围内编辑申请独立审核后生效，完成状态保留');
-  await login('manager');await list();await action('task',taskId);await action('delete-task',taskId);await action('confirm-delete',taskId);await modalClosed();
+  await login('manager');await go('calendar');await page.locator('[data-task-view=calendar]').click();await page.locator('.calendar-mode-tabs [data-mode=week]').click();await action('task',taskId);await action('delete-task',taskId);await page.locator('[data-reviewer-query]').fill('许文清');await page.locator('[data-reviewer-person][value=founder]').check();await action('confirm-delete',taskId);await modalClosed();
   const deletion=db.requests.find(r=>r.kind==='delete');assert.equal(db.tasks.find(t=>t.id===taskId).deleted,false);
   await login('founder');await requests();await action('request',deletion.id);
   await page.getByRole('button',{name:'审核通过',exact:true}).click();await page.locator('.messages-dialog').waitFor();await page.locator('[data-close]').click();

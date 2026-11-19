@@ -94,7 +94,7 @@ BUILD.mkdir(parents=True, exist_ok=True)
 ASSETS = BUILD / 'assets/web'
 for folder in (ASSETS / 'src', BUILD / 'classes', BUILD / 'dex'):
     folder.mkdir(parents=True, exist_ok=True)
-assets = ['index.html', 'favicon.svg', 'src/app.js', 'src/domain.js', 'src/style.css', 'src/mobile.css']
+assets = ['index.html', 'favicon.svg', 'src/app.js', 'src/domain.js', 'src/date-picker.js', 'src/style.css', 'src/mobile.css']
 for name in assets:
     shutil.copy2(ROOT / name, ASSETS / name)
 run(JAVA / 'bin/javac.exe', '--release', '8', '-encoding', 'UTF-8', '-classpath', PLATFORM, '-d', BUILD / 'classes', ROOT / 'android/src/com/pandora/demo/MainActivity.java', build_config)

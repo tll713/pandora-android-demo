@@ -139,7 +139,9 @@ function taskValues(u, v, existing) {
   requireValue(detail.length <= 2000, '任务说明不能超过 2000 个字');
   return { title: cleaned(v.title, '任务名称', 80), owners, startAt, dueAt: v.dueAt, priority: v.priority, detail };
 }
-export function requestTaskChange(db, u, kind, values = {}, taskId = null, now = new Date()) {
+export const allowedReviewers = u => USERS.filter(v => v.enabled !== false && v.id !== u?.id);
+export function requestTaskChange(db, u, kind, values = {}, taskId = null, now = new Date(), reviewers = undefined) {
+  if (reviewers !== undefined) requireValue(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.every(id => allowedReviewers(u).some(v => v.id === id)), '请选择启用且非申请人本人的成员作为审核人');
   requireValue(['create', 'edit', 'delete'].includes(kind), '未知变更类型');
   requireValue(kind === 'create' || isManager(u), '当前身份不能编辑或删除任务');
   const task = kind === 'create' ? null : db.tasks.find(t => t.id === taskId);
@@ -149,20 +151,24 @@ export function requestTaskChange(db, u, kind, values = {}, taskId = null, now =
   }
   const after = kind === 'delete' ? null : taskValues(u, values, task);
   const request = { id: id('request'), kind, taskId: task?.id || id('task'), proposer: u.id, status: 'pending',
-    after, before: task ? structuredClone(task) : null, expectedRevision: task?.revision || 0, createdAt: new Date(now).toISOString() };
+    after, before: task ? structuredClone(task) : null, expectedRevision: task?.revision || 0, createdAt: new Date(now).toISOString(), reviewers: [...new Set(reviewers || [])].sort(), reviews: [] };
   db.requests.unshift(request); return request;
 }
 export const createTask = (db, u, values, now) => requestTaskChange(db, u, 'create', values, null, now);
 export function canReviewRequest(u, r) {
-  return Boolean(isGlobal(u) && r && r.proposer !== u.id && r.status === 'pending');
+  return Boolean(u && u.enabled !== false && r && r.proposer !== u.id && r.status === 'pending' && (r.reviewers?.length ? r.reviewers.includes(u.id) : isGlobal(u)) && !(r.reviews || []).some(v => v.reviewer === u.id));
 }
-export const visibleRequests = (db, u) => db.requests.filter(r => isGlobal(u) || r.proposer === u?.id);
+export const visibleRequests = (db, u) => db.requests.filter(r => isGlobal(u) || r.proposer === u?.id || r.reviewers?.includes(u?.id));
 export function reviewTaskChange(db, u, requestId, approve, reason = '', now = new Date()) {
   const r = db.requests.find(v => v.id === requestId);
-  requireValue(canReviewRequest(u, r), '需由另一位管理员或创始人审核待处理申请');
+  requireValue(canReviewRequest(u, r), '需由另一位有权限的审核人审核待处理申请');
   const note = approve ? String(reason).trim() : cleaned(reason, '驳回原因', 500);
   requireValue(note.length <= 500, '审核备注不能超过 500 个字');
   const at = new Date(now).toISOString();
+  const records = [...(r.reviews || []), {reviewer:u.id,approve,reason:note,at}];
+  if (approve && r.reviewers?.length && !r.reviewers.every(id => records.some(v => v.reviewer === id && v.approve))) {
+    r.reviews = records; return r;
+  }
   if (approve) {
     if (r.kind === 'create') {
       requireValue(!db.tasks.some(t => t.id === r.taskId), '任务已存在，请勿重复审核');
@@ -175,7 +181,7 @@ export function reviewTaskChange(db, u, requestId, approve, reason = '', now = n
       task.revision++; task.history.push({ at, actor: u.id, text: r.kind === 'edit' ? '任务编辑审核通过' : '任务删除审核通过，记录归档' });
     }
   }
-  Object.assign(r, { status: approve ? 'approved' : 'rejected', reviewer: u.id, reviewedAt: at, reason: note });
+  Object.assign(r, { status: approve ? 'approved' : 'rejected', reviewer: u.id, reviewedAt: at, reason: note, reviews: records });
   return r;
 }
 export function updateTaskDetail(db, u, taskId, note, now = new Date()) {

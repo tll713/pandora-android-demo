@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-const allowed = new Set(['index.html', 'favicon.svg', 'src/app.js', 'src/domain.js', 'src/style.css', 'src/mobile.css']);
+const allowed = new Set(['index.html', 'favicon.svg', 'src/app.js', 'src/domain.js', 'src/date-picker.js', 'src/style.css', 'src/mobile.css']);
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 const port = Number(process.env.PANDORA_PORT || 5173);
 http.createServer(async (req, res) => {

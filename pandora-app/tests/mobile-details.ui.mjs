@@ -21,6 +21,8 @@ await page.route('**/api/**',route => {
   const calendarUrl = new URL(route.request().url());
   if (calendarUrl.pathname === '/api/calendar/metadata') return route.fulfill({json:{year:Number(calendarUrl.searchParams.get('year')),published:false,source:'',holidays:{},solarTerms:{}}});
   const url = route.request().url();
+  if (url.endsWith('/directory')) return route.fulfill({json:db.members});
+  if (url.endsWith('/logs/history')) return route.fulfill({json:db.logs});
   if (url.endsWith('/toggle')) { const todo = db.todos.find(t => url.endsWith(`/todos/${t.id}/toggle`)); todo.done=!todo.done; return route.fulfill({json:todo}); }
   return route.fulfill({status:200,json:url.endsWith('/comments') ? [{authorName:'系统管理员',createdAt:`${today}T11:00`,content:longText}] : {user:member,db}});
 });
@@ -118,7 +120,10 @@ try {
     assert.equal(await page.locator('.task-table tbody tr').count(),13);
     const gutters = await page.locator('.company-panel').evaluate(el => ({left:getComputedStyle(el).paddingLeft,right:getComputedStyle(el).paddingRight}));
     assert.deepEqual(gutters,{left:'20px',right:'20px'});
-    await page.locator('.nav [data-route=logs]').tap();
+    await page.locator('[data-task-view=directory]').tap();
+    if (await page.locator('[data-action=directory-back]').count()) await page.locator('[data-action=directory-back]').tap();
+    await page.locator('[data-action=directory-member][data-id=lin]').tap();
+    await page.locator('[data-action=directory-tab][data-id=logs]').tap();
     await page.locator('[data-action=log][data-id=log1]').tap();
     await page.locator('#modal .comment-item').waitFor();
     await checkDialog(['.modal-head','.detail-copy','.log-linked-task','.detail-actions','.detail-history']);
@@ -158,8 +163,10 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth>innerWidth),false);
   }
   await page.locator('[data-action=calendar-back]').tap();
-  await page.locator('[data-form=calendar-jump] [name=date]').fill('2026-11-30');
-  await page.locator('[data-form=calendar-jump] button[type=submit]').tap();
+  await page.locator('[data-picker-year-choice]').selectOption('2026');
+  await page.locator('[data-picker-month]').selectOption('10');
+  await page.locator('[data-picker-day="2026-11-30"]').tap();
+  await page.locator('[data-picker-apply]').tap();
   await page.locator('.calendar-mode-tabs [data-mode=week]').tap();
   assert.equal(await page.locator('[data-day="2026-12-01"]').count(),1,'week strip keeps dates from the adjacent month');
   assert.deepEqual(errors,[]);

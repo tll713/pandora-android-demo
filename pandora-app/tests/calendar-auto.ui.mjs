@@ -30,8 +30,11 @@ const close = () => page.locator('#modal [data-close]').click();
 async function jump(date) {
   await page.locator('.calendar-mode-tabs [data-mode=month]').click();
   await page.locator('[data-action=calendar-back]').click();
-  await page.locator('[data-form=calendar-jump] [name=date]').fill(date);
-  await page.locator('[data-form=calendar-jump] button[type=submit]').click();
+  await page.locator('[data-picker-year-choice]').selectOption(date.slice(0,4));
+  await page.locator('[data-picker-month]').selectOption(String(Number(date.slice(5,7))-1));
+  await page.locator(`[data-picker-day="${date}"]`).click();
+  await page.locator('[data-picker-apply]').click();
+  await page.locator('.calendar-mode-tabs [data-mode=week]').click();
   await page.locator('.calendar-mode-tabs [data-mode=month]').click();
 }
 try {

@@ -38,6 +38,12 @@ public class ChangeRequest {
     @Column(name = "reviewer_id")
     private String reviewerId;
 
+    @Column(name = "reviewers_json", columnDefinition = "LONGTEXT")
+    private String reviewersJson;
+
+    @Column(name = "reviews_json", columnDefinition = "LONGTEXT")
+    private String reviewsJson;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -72,6 +78,10 @@ public class ChangeRequest {
     public void setReason(String reason) { this.reason = reason; }
     public String getReviewerId() { return reviewerId; }
     public void setReviewerId(String reviewerId) { this.reviewerId = reviewerId; }
+    public String getReviewersJson() { return reviewersJson; }
+    public void setReviewersJson(String reviewersJson) { this.reviewersJson = reviewersJson; }
+    public String getReviewsJson() { return reviewsJson; }
+    public void setReviewsJson(String reviewsJson) { this.reviewsJson = reviewsJson; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getReviewedAt() { return reviewedAt; }

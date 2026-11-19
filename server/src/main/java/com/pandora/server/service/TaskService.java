@@ -93,6 +93,43 @@ public class TaskService {
 
     @Transactional
     public ChangeRequest requestTaskChange(User proposer, String kind, Map<String, Object> values, String taskId) {
+        return requestTaskChange(proposer, kind, values, taskId, null);
+    }
+
+    public List<User> getAllowedReviewers(User proposer) {
+        return userRepository.findAll().stream().filter(User::isEnabled)
+                .filter(u -> !u.getId().equals(proposer.getId())).toList();
+    }
+
+    private List<String> validateReviewers(User proposer, Object input) {
+        // Older clients and pending requests retain their original independent-review flow.
+        if (input == null) return List.of();
+        if (!(input instanceof List<?> ids) || ids.isEmpty()) throw new IllegalArgumentException("请选择至少一位审核人");
+        Set<String> allowed = getAllowedReviewers(proposer).stream().map(User::getId).collect(Collectors.toSet());
+        Set<String> selected = new TreeSet<>();
+        for (Object id : ids) {
+            if (!(id instanceof String value) || !allowed.contains(value))
+                throw new IllegalArgumentException("只能选择启用的成员，且不能选择申请人本人");
+            selected.add((String) id);
+        }
+        return List.copyOf(selected);
+    }
+
+    public List<String> reviewers(ChangeRequest request) {
+        try { return request.getReviewersJson() == null ? List.of() : new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(request.getReviewersJson(), new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}); }
+        catch (Exception e) { throw new IllegalStateException("审核人数据无效", e); }
+    }
+
+    public List<Map<String, Object>> reviews(ChangeRequest request) {
+        try { return request.getReviewsJson() == null ? List.of() : new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(request.getReviewsJson(), new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}); }
+        catch (Exception e) { throw new IllegalStateException("审核记录无效", e); }
+    }
+
+    @Transactional
+    public ChangeRequest requestTaskChange(User proposer, String kind, Map<String, Object> values, String taskId, Object reviewerIds) {
+        List<String> selectedReviewers = validateReviewers(proposer, reviewerIds);
         if (!Set.of("create", "edit", "delete").contains(kind)) throw new IllegalArgumentException("未知变更类型");
         if (!"create".equals(kind) && !proposer.isManager())
             throw new IllegalArgumentException("当前身份不能编辑或删除任务");
@@ -118,7 +155,8 @@ public class TaskService {
         if ("create".equals(kind)) {
             for (ChangeRequest pending : changeRequestRepository.findByProposerId(proposer.getId())) {
                 if (pending.getKind() == ChangeRequest.Kind.CREATE && pending.getStatus() == ChangeRequest.Status.PENDING
-                        && Objects.equals(fromJson(pending.getAfterJson()), after)) return pending;
+                        && Objects.equals(fromJson(pending.getAfterJson()), after)
+                        && reviewers(pending).equals(selectedReviewers)) return pending;
             }
         }
         ChangeRequest req = new ChangeRequest();
@@ -131,6 +169,8 @@ public class TaskService {
         req.setBeforeJson(task != null ? toJson(taskToMap(task)) : null);
         req.setExpectedRevision(task != null ? task.getRevision() : 0);
         req.setCreatedAt(LocalDateTime.now());
+        req.setReviewersJson(toJson(selectedReviewers));
+        req.setReviewsJson("[]");
         return changeRequestRepository.save(req);
     }
 
@@ -183,26 +223,35 @@ public class TaskService {
 
     public List<ChangeRequest> getVisibleRequests(User user) {
         if (user.isGlobal()) return changeRequestRepository.findAll();
-        return changeRequestRepository.findByProposerId(user.getId());
+        return changeRequestRepository.findAll().stream()
+                .filter(r -> r.getProposerId().equals(user.getId()) || reviewers(r).contains(user.getId())).toList();
     }
 
     public boolean canReviewRequest(User user, ChangeRequest req) {
-        return user.isGlobal() && req != null 
+        return user.isEnabled() && req != null
                 && !req.getProposerId().equals(user.getId()) 
-                && req.getStatus() == ChangeRequest.Status.PENDING;
+                && req.getStatus() == ChangeRequest.Status.PENDING
+                && (reviewers(req).isEmpty() ? user.isGlobal() : reviewers(req).contains(user.getId()))
+                && reviews(req).stream().noneMatch(r -> user.getId().equals(r.get("reviewer")));
     }
 
     @Transactional
     public ChangeRequest reviewTaskChange(User reviewer, String requestId, boolean approve, String reason) {
         ChangeRequest req = changeRequestRepository.findForUpdate(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("申请不存在"));
-        if (!canReviewRequest(reviewer, req)) throw new IllegalArgumentException("需由另一位管理员或创始人审核待处理申请");
+        if (!canReviewRequest(reviewer, req)) throw new IllegalArgumentException("仅指定且尚未审核的审核人可处理待审申请，申请人不能自审");
         String note = approve ? (reason == null ? "" : reason.trim()) : 
                 (reason == null || reason.trim().isEmpty() ? "" : reason.trim());
         if (!approve && note.isEmpty()) throw new IllegalArgumentException("请填写驳回原因");
         if (note.length() > 500) throw new IllegalArgumentException("审核备注不能超过 500 个字");
 
         LocalDateTime at = LocalDateTime.now();
+        List<Map<String, Object>> records = new ArrayList<>(reviews(req));
+        records.add(Map.of("reviewer", reviewer.getId(), "approve", approve, "reason", note, "at", at.toString()));
+        req.setReviewsJson(toJson(records));
+        Set<String> approved = records.stream().filter(r -> Boolean.TRUE.equals(r.get("approve")))
+                .map(r -> (String) r.get("reviewer")).collect(Collectors.toSet());
+        if (approve && !approved.containsAll(reviewers(req))) return changeRequestRepository.save(req);
         if (approve) {
             if (req.getKind() == ChangeRequest.Kind.CREATE) {
                 if (taskRepository.existsById(req.getTaskId())) throw new IllegalArgumentException("任务已存在，请勿重复审核");

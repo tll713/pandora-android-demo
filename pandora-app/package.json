@@ -9,7 +9,7 @@
     "test:ui": "node ../scripts/test-ui.mjs",
     "test:workspace": "node tests/workspace.ui.mjs && node tests/task-tags.ui.mjs",
     "test:mobile": "node tests/mobile-details.ui.mjs",
-    "check": "node --check src/app.js && node --check src/domain.js && node --check server.mjs && node --check ../web-admin/app.js",
+    "check": "node --check src/app.js && node --check src/domain.js && node --check src/date-picker.js && node --check server.mjs && node --check ../web-admin/app.js",
     "build:android": "python scripts/build_android.py"
   },
   "engines": {

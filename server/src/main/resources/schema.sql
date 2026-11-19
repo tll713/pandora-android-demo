@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS change_requests (
   expected_revision INT,
   reason VARCHAR(500),
   reviewer_id VARCHAR(30),
+  reviewers_json LONGTEXT,
+  reviews_json LONGTEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   reviewed_at DATETIME,
   FOREIGN KEY (proposer_id) REFERENCES users(id),
@@ -128,6 +130,20 @@ CREATE TABLE IF NOT EXISTS highlights (
 );
 
 -- Upgrade existing installations without dropping business data.
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'change_requests' AND column_name = 'reviewers_json') = 0,
+  'ALTER TABLE change_requests ADD COLUMN reviewers_json LONGTEXT', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'change_requests' AND column_name = 'reviews_json') = 0,
+  'ALTER TABLE change_requests ADD COLUMN reviews_json LONGTEXT', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
 
 SET @pandora_ddl = IF(
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'phone') = 0,
@@ -241,6 +257,13 @@ CREATE TABLE IF NOT EXISTS daily_todos (
 );
 
 -- 操作流水：系统日志页按时间线展示员工的所有操作
+SET @pandora_ddl = IF(
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'daily_todos' AND column_name = 'color') = 0,
+  'ALTER TABLE daily_todos ADD COLUMN color VARCHAR(7) DEFAULT ''#567c73''', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
+
 -- Remember initialized demo checklists independently of user-editable todo rows.
 CREATE TABLE IF NOT EXISTS demo_activity_days (
   id VARCHAR(50) PRIMARY KEY

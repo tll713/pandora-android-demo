@@ -43,8 +43,22 @@ public class TodoService {
         todo.setOwnerId(ownerId);
         todo.setDate(date);
         todo.setTitle(title);
+        todo.setColor(validColor(values.getOrDefault("color", "#567c73")));
         todo.setDone(false);
         return todoRepository.save(todo);
+    }
+
+    @Transactional
+    public DailyTodo updateColor(String ownerId, String id, Object color) {
+        DailyTodo todo = own(ownerId, id);
+        todo.setColor(validColor(color));
+        return todoRepository.save(todo);
+    }
+
+    private String validColor(Object value) {
+        if (!(value instanceof String color) || !color.matches("^#[0-9a-fA-F]{6}$"))
+            throw new IllegalArgumentException("请选择有效的事项颜色");
+        return color.toLowerCase(java.util.Locale.ROOT);
     }
 
     @Transactional

@@ -38,8 +38,11 @@ const mode = value => page.locator(`.calendar-mode-tabs [data-mode="${value}"]`)
 async function jump(date) {
   await mode('month');
   await page.locator('[data-action=calendar-back]').click();
-  await page.locator('[data-form=calendar-jump] [name=date]').fill(date);
-  await page.locator('[data-form=calendar-jump] button[type=submit]').click();
+  await page.locator('[data-picker-year-choice]').selectOption(date.slice(0,4));
+  await page.locator('[data-picker-month]').selectOption(String(Number(date.slice(5,7))-1));
+  await page.locator(`[data-picker-day="${date}"]`).click();
+  await page.locator('[data-picker-apply]').click();
+  await page.locator('.calendar-mode-tabs [data-mode=week]').click();
 }
 try {
   await page.goto(process.env.PANDORA_URL || 'http://127.0.0.1:5173');
@@ -83,8 +86,11 @@ try {
   await page.locator('[data-action=today]').click();
   assert.equal(await page.locator('.timeline-item').count(),10);
   await mode('month');await page.locator('[data-action=calendar-back]').click();
-  await page.locator('[data-calendar-month="2026-12-01"]').click();
-  assert.equal(await page.locator('.ios-month-title').innerText(),'十二月');
+  await page.locator('[data-picker-year-choice]').selectOption('2026');
+  await page.locator('[data-picker-month]').selectOption('11');
+  await page.locator('[data-picker-day="2026-12-01"]').click();
+  await page.locator('[data-picker-apply]').click();
+  assert.equal(await page.locator('.ios-month-title button > span').innerText(),'十二月');
   await page.locator('[data-action=today]').click();
   await page.locator('[data-task-view=list]').click();
   assert.equal(await page.locator('.task-table tbody tr').count(),10);

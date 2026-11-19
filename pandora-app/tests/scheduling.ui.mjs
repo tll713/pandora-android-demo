@@ -23,6 +23,7 @@ await page.route('**/api/**',async route=>{
   const req=route.request(),url=new URL(req.url()),send=(json,status=200)=>route.fulfill({json,status});
   if(url.pathname.endsWith('/calendar/metadata')) return send({year:Number(url.searchParams.get('year')),published:false,holidays:{},solarTerms:{}});
   if(url.pathname.endsWith('/workspace')) return send({user:members[0],db});
+  if(url.pathname.endsWith('/directory')) return send(members);
   if(url.pathname.endsWith('/tags')) return send([]);
   if(url.pathname.endsWith('/logs/history')) {historyCalls++;return send(db.logs);}
   if(url.pathname.endsWith('/comments')) return commentFailure ? send({error:'offline'},503) : send([]);
@@ -135,28 +136,24 @@ try {
   await go('calendar');await page.locator('[data-task-view=calendar]').click();
   assert.deepEqual(await page.locator('.calendar-mode-tabs [data-mode]').evaluateAll(els=>els.map(el=>el.dataset.mode)),['month','week']);
   assert.equal(await page.locator('.day-todo-dot').count(),0);
-  await go('logs');await page.locator('[name=department]').selectOption('研发部');
-  assert.match(await page.locator('.log-submission strong').innerText(),/1 \/ 2/);
-  await page.locator('[name=submission]').selectOption('missing');
-  assert.match(await page.locator('.log-results').innerText(),/周一鸣/);
-  assert.doesNotMatch(await page.locator('.log-results').innerText(),/昨日实际日报|演示日报|实际日报|林予安/);
-  assert.equal(await page.locator('.submission-person').count(),1);
-  await page.locator('[data-log-member=zhou]').click();
-  assert.equal(await page.locator('[name=submission]').inputValue(),'missing');
-  await page.locator('[data-action=log-member-history]').click();
-  assert.ok(historyCalls>0);assert.match(await page.locator('.log-results').innerText(),/昨日实际日报/);
-  await page.locator('[data-action=clear-log-filters]').click();
-  await page.locator('[name=department]').selectOption('研发部');
-  await page.locator('[name=submission]').selectOption('submitted');
+  await go('logs');
+  assert.equal(await page.locator('.log-results .log-card').count(),0);
+  await go('calendar'); await page.locator('[data-task-view=directory]').click();
+  await page.locator('[data-action=directory-member][data-id=zhou]').click();
+  await page.locator('[data-action=directory-tab][data-id=logs]').click();
+  await page.getByRole('button',{name:'昨日实际日报',exact:true}).waitFor();
+  assert.ok(historyCalls>0);
+  await page.locator('[data-action=directory-back]').click();
+  await page.locator('[data-action=directory-member][data-id=lin]').click();
+  await page.locator('[data-action=directory-tab][data-id=logs]').click();
   assert.equal(await page.locator('.log-results .log-card').count(),1);
-  assert.match(await page.locator('.log-results').innerText(),/实际日报/);
   await page.locator('[data-action=log][data-id=real]').click();
   await page.locator('#modal [role=alert]').filter({hasText:'评论加载失败，请重试'}).waitFor();
   assert.doesNotMatch(await page.locator('#modal').innerText(),/评论（0）/);
   commentFailure=false;await page.locator('[data-action=retry-log-comments]').click();
   await page.getByText('评论（0）',{exact:true}).waitFor();
   await page.locator('[data-close]').click();
-  await page.screenshot({path:'output/playwright/log-submission-filter.png',fullPage:true});
+  await page.screenshot({path:'output/playwright/directory-log-comments.png',fullPage:true});
   await go('dashboard');
   for(const width of [360,390,768,1280]) {
     await page.setViewportSize({width,height:844});
@@ -164,5 +161,5 @@ try {
     await page.screenshot({path:`output/playwright/todo-week-${width}.png`,fullPage:true});
   }
   assert.deepEqual(errors,[]);
-  console.log('Scheduling passed: overflow long press, cancel/invalid restore, future-only move, undo, matching task scopes, submission filters, demo exclusion and comment retry.');
+  console.log('Scheduling passed: overflow long press, cancel/invalid restore, future-only move, undo, matching task scopes, personal list scope, directory history and comment retry.');
 } finally {await browser.close();}

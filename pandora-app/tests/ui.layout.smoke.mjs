@@ -41,7 +41,7 @@ try {
   await page.locator('[data-task-view="list"]').click();
   assert.equal(await page.locator('.task-table tbody tr').count(),5);
   await page.locator('[data-task-view="calendar"]').click();
-  await page.locator('[data-action="calendar-back"]').click();
+  await page.locator('.calendar-mode-tabs [data-mode=month]').click();
   await page.locator('.calendar-day.is-today .day-date').click();
   await page.locator('.calendar-mode-tabs [data-mode=week]').click();
   assert.equal(await page.locator('.timeline-item').count(),6);
