@@ -5,6 +5,7 @@ import com.pandora.server.service.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -159,8 +160,7 @@ public class ApiController {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         List<Task> tasks = taskService.getVisibleTasks(user);
-        // 同时覆盖本月日志统计和月初跨月的最近七天。
-        List<WorkLog> logs = logService.getRecentLogs(user, Math.max(7, LocalDate.now().getDayOfMonth()));
+        List<WorkLog> logs = logService.getWorkspaceLogs(user);
         List<ChangeRequest> requests = taskService.getVisibleRequests(user);
         List<Announcement> announcements = announcementService.getAll();
         List<String> pins = taskService.getUserPins(user.getId());
@@ -319,6 +319,19 @@ public class ApiController {
             ChangeRequest req = taskService.reviewTaskChange(user, id, approve, reason);
             audit(user, approve ? "通过任务申请" : "驳回任务申请", text(req.getTaskId()),
                     approve ? (req.getStatus() == ChangeRequest.Status.PENDING ? "本次通过，等待其他审核人" : "审核通过") : "审核驳回" + (reason == null || reason.isBlank() ? "" : "：" + reason));
+            return ResponseEntity.ok(requestToMap(req));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/tasks/requests/{id}/withdraw")
+    public ResponseEntity<?> withdrawRequest(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
+        if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
+        User user = userRepository.findById(ud.getUsername()).orElseThrow();
+        try {
+            ChangeRequest req = taskService.withdrawTaskChange(user, id);
+            audit(user, "撤回任务申请", req.getTaskId(), req.getReason());
             return ResponseEntity.ok(requestToMap(req));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -813,11 +826,12 @@ public class ApiController {
     }
 
     @DeleteMapping("/admin/tags/{id}")
+    @Transactional
     public ResponseEntity<?> adminDeleteTag(@AuthenticationPrincipal UserDetails ud, @PathVariable String id) {
         if (ud == null) return ResponseEntity.status(401).body(Map.of("error", "未登录"));
         User user = userRepository.findById(ud.getUsername()).orElseThrow();
         if (!user.isGlobal()) return ResponseEntity.status(403).body(Map.of("error", "只有系统管理员或创始人可以删除标签"));
-        Tag tag = tagRepository.findById(id).orElse(null);
+        Tag tag = tagRepository.findForUpdate(id).orElse(null);
         if (tag == null) return ResponseEntity.badRequest().body(Map.of("error", "标签不存在"));
         int cleared = taskRepository.clearTag(id);
         tagRepository.deleteById(id);

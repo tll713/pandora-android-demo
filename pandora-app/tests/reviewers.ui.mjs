@@ -24,6 +24,11 @@ await page.route('**/api/**',async route => {
     if (path === '/calendar/metadata') return send({year:Number(url.searchParams.get('year')),published:false,holidays:{},solarTerms:{}});
     if (path === '/tasks/requests') { sent.push(body); return send(requestTaskChange(db,actor,body.kind,body.values,body.taskId,now,body.reviewers)); }
     if (path.endsWith('/review')) return send(reviewTaskChange(db,actor,path.split('/')[3],body.approve,body.reason,now));
+    if (path.endsWith('/withdraw')) {
+      const change = db.requests.find(r => r.id === path.split('/')[3]);
+      Object.assign(change, {status:'withdrawn',reviewer:actor.id,reviewedAt:now.toISOString(),reason:'有尚未提交意见的审核人已不可用'});
+      return send(change);
+    }
     return send({error:`Unexpected ${path}`},404);
   } catch (error) { return send({error:error.message},400); }
 });
@@ -139,6 +144,18 @@ try {
   await page.getByRole('button',{name:'审核通过',exact:true}).click();
   await page.locator('.messages-dialog').waitFor();
   assert.equal(request.status,'approved'); assert.equal(db.tasks.some(t => t.id === request.taskId),true);
+
+  const blocked = requestTaskChange(db,userById('manager'),'create',request.after,null,now,['lin','chen']);
+  reviewTaskChange(db,userById('lin'),blocked.id,true,'资料齐全',now);
+  userById('chen').enabled = false;
+  await login('other'); await openRequest(blocked.id);
+  assert.match(await page.locator('.review-progress').innerText(),/账号不可用/);
+  await page.getByRole('button',{name:'撤回申请',exact:true}).click();
+  await page.locator('.messages-dialog').waitFor();
+  await action('request',blocked.id);
+  assert.match(await page.locator('#modal').innerText(),/已撤回/);
+  assert.match(await page.locator('.review-progress').innerText(),/资料齐全/);
+  assert.equal(await page.locator('[data-form=withdraw-request]').count(),0);
   assert.deepEqual(errors,[]);
   console.log('Reviewer and date picker UI passed: horizontal department-position-person cascade, any enabled member including employees, name/role search, IME, cross-filter multi-selection, required selection, 12-year dropdown and calendar/time selection, permissions and unanimous approval.');
 } finally { await browser.close(); }

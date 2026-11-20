@@ -278,6 +278,49 @@ class SecurityAndConcurrencyTest {
     }
 
     @Test
+    void withdrawingAfterReviewerDisablePreservesVotesAndAllowsResubmission() throws Exception {
+        String taskId = createTask();
+        User departmentManager = member(User.Role.DEPT_MANAGER, employee.getDepartment());
+        ChangeRequest pending = service.requestTaskChange(departmentManager, "delete", null, taskId,
+                List.of(founder.getId(), employee.getId()));
+        String endpoint = "/api/tasks/requests/" + pending.getId() + "/withdraw";
+        String adminToken = auth.authenticate(admin.getName(), "test-pass-123");
+        String reviewerToken = auth.authenticate(employee.getName(), "test-pass-123");
+        mvc.perform(post(endpoint).header("Authorization", "Bearer " + adminToken)).andExpect(status().isBadRequest());
+        mvc.perform(post(endpoint).header("Authorization", "Bearer " + reviewerToken)).andExpect(status().isBadRequest());
+
+        service.reviewTaskChange(founder, pending.getId(), true, "同意归档");
+        disable(employee);
+        mvc.perform(post(endpoint).header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("withdrawn"))
+                .andExpect(jsonPath("$.reviews[0].reason").value("同意归档"));
+        assertFalse(tasks.findById(taskId).orElseThrow().getDeleted());
+        assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(employee, pending.getId(), true, ""));
+
+        ChangeRequest replacement = service.requestTaskChange(departmentManager, "delete", null, taskId, List.of(founder.getId()));
+        assertEquals(ChangeRequest.Status.WITHDRAWN, service.withdrawTaskChange(departmentManager, replacement.getId()).getStatus());
+    }
+
+    @Test
+    void finalApprovalChecksCurrentAssignmentScopeForCreateAndEdit() {
+        String taskId = createTask();
+        User manager = member(User.Role.DEPT_MANAGER, employee.getDepartment());
+        ChangeRequest creation = service.requestTaskChange(manager, "create", values("等待调岗后审批"), null);
+        ChangeRequest edit = service.requestTaskChange(manager, "edit", values("等待调岗后修改"), taskId);
+        accounts.updateUser(admin, employee.getId(), employee.getName(), employee.getPhone(), null, null,
+                "其他部门", employee.getRole().name(), true);
+
+        for (ChangeRequest request : List.of(creation, edit)) {
+            assertThrows(IllegalArgumentException.class, () -> service.reviewTaskChange(founder, request.getId(), true, ""));
+            ChangeRequest stored = requests.findById(request.getId()).orElseThrow();
+            assertEquals(ChangeRequest.Status.PENDING, stored.getStatus());
+            assertTrue(service.reviews(stored).isEmpty());
+        }
+        assertFalse(tasks.existsById(creation.getTaskId()));
+        assertEquals("并发任务", tasks.findById(taskId).orElseThrow().getTitle());
+    }
+
+    @Test
     void concurrentPinAndArchiveCannotLeaveAnArchivedPin() throws Exception {
         String id = createTask();
         ChangeRequest deletion = service.requestTaskChange(admin, "delete", null, id);

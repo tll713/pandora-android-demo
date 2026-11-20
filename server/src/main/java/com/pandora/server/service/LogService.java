@@ -5,6 +5,7 @@ import com.pandora.server.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -16,11 +17,14 @@ public class LogService {
     private final WorkLogRepository workLogRepository;
     private final TaskService taskService;
     private final UserRepository userRepository;
+    private final Clock businessClock;
 
-    public LogService(WorkLogRepository workLogRepository, TaskService taskService, UserRepository userRepository) {
+    public LogService(WorkLogRepository workLogRepository, TaskService taskService, UserRepository userRepository,
+                      Clock businessClock) {
         this.workLogRepository = workLogRepository;
         this.taskService = taskService;
         this.userRepository = userRepository;
+        this.businessClock = businessClock;
     }
 
     public List<WorkLog> getVisibleLogs(User user) {
@@ -33,7 +37,16 @@ public class LogService {
     }
 
     public List<WorkLog> getRecentLogs(User user, int days) {
-        LocalDate end = LocalDate.now();
+        return getRecentLogs(user, LocalDate.now(businessClock), days);
+    }
+
+    public List<WorkLog> getWorkspaceLogs(User user) {
+        LocalDate today = LocalDate.now(businessClock);
+        // 同时覆盖本月日志统计和月初跨月的最近七天。
+        return getRecentLogs(user, today, Math.max(7, today.getDayOfMonth()));
+    }
+
+    private List<WorkLog> getRecentLogs(User user, LocalDate end, int days) {
         LocalDate start = end.minusDays(days - 1);
         if (user.isGlobal()) return workLogRepository.findByDateBetween(start, end);
         if (user.getRole() == User.Role.EMPLOYEE) return workLogRepository.findByAuthorIdAndDateBetween(user.getId(), start, end);
@@ -76,7 +89,7 @@ public class LogService {
     public WorkLog saveLog(User author, Map<String, Object> values, String logId) {
         // The author lock also serializes first writes when no log row exists yet.
         userRepository.findForUpdate(author.getId()).orElseThrow(() -> new IllegalArgumentException("账号不存在"));
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(businessClock);
         LocalDate earliest = today.minusDays(2);
         String requestedDate = (String) values.get("date");
         LocalDate logDate;
@@ -122,7 +135,7 @@ public class LogService {
         if (tagId != null && tagId.length() > 40) throw new IllegalArgumentException("日志标签格式不正确");
         if (tagId != null && tagId.isBlank()) tagId = null;
 
-        LocalDateTime at = LocalDateTime.now();
+        LocalDateTime at = LocalDateTime.now(businessClock);
         if (existing != null) {
             LogVersion v = new LogVersion();
             v.setLog(existing);

@@ -55,7 +55,7 @@ public class ChangeRequest {
     }
 
     public enum Status {
-        PENDING, APPROVED, REJECTED
+        PENDING, APPROVED, REJECTED, WITHDRAWN
     }
 
     public String getId() { return id; }

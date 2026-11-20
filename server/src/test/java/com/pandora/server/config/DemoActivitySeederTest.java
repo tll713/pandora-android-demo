@@ -191,13 +191,14 @@ class DemoActivitySeederTest {
 
     @Test
     void missingMemberCanSubmitAndRestartKeepsTheirActualWork() {
-        LocalDate today = LocalDate.now();
+        var clock = java.time.Clock.system(java.time.ZoneId.of("Asia/Shanghai"));
+        LocalDate today = LocalDate.now(clock);
         member("lin", "林予安"); member("zhou", "周一鸣"); member("manager", "沈知夏");
         seeder.topUpAt(today);
         String missingId = List.of("lin", "zhou", "manager").stream()
                 .filter(id -> logs.findByAuthorIdAndDate(id, today).isEmpty()).findFirst().orElseThrow();
         long submittedBefore = logs.findByDateBetween(today, today).size();
-        LogService service = new LogService(logs, mock(TaskService.class), users);
+        LogService service = new LogService(logs, mock(TaskService.class), users, clock);
         WorkLog submitted = service.saveLog(users.findById(missingId).orElseThrow(),
                 Map.of("date", today.toString(), "title", "本人今日工作", "content", "通过日志保存流程提交的实际内容"), null);
         logs.flush();

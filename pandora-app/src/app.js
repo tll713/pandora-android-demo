@@ -13,12 +13,12 @@ const API = window.__PANDORA_API_BASE__ || (location.port === '5173' ? `${locati
 
 const state = { token: localStorage.getItem('pandora.token'), user: null, route: 'dashboard', filter: 'all',
   directoryMember: '', directoryTab: 'tasks', directoryQuery: '', directoryDate: dateKey(),
-  directoryTaskFilters: {query:'',priority:'',filter:'all'}, directoryContacts: {}, directoryLoading: false, directoryLoaded: false, directoryError: '',
+  directoryTaskFilters: {query:'',priority:'',filter:'all'}, directoryContacts: {}, directoryLoading: false, directoryError: '',
   calendarMode: 'month', calendarDate: dateKey(), todoDate: dateKey(), todoMode: 'week', logRange: '7', logQuery: '', logComments: {},
   logFrom: '', logTo: '', messageFilter: 'all',
   taskQuery: '', taskPriority: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null,
   calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
-const APP_VERSION = '0.5.22';
+const APP_VERSION = '0.5.23';
 let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '', workspaceLoad = 0;
 let todoDateVersion = 0;
 
@@ -178,7 +178,7 @@ function logout() {
   state.token = null; state.user = null; state.db = null; state.route = 'dashboard';
   state.logHistoryLoaded = false; state.logLoading = false; state.logError = ''; state.logRange = '7'; state.logQuery = '';
   state.directoryMember = ''; state.directoryTaskFilters={query:'',priority:'',filter:'all'}; state.directoryTab = 'tasks'; state.directoryQuery = '';
-  state.directoryContacts = {}; state.directoryLoaded = false; state.directoryLoading = false; state.directoryError = '';
+  state.directoryContacts = {}; state.directoryLoading = false; state.directoryError = '';
   state.taskQuery = ''; state.taskPriority = ''; state.filter = 'all';
   resetLogFilters(); state.messageFilter = 'all'; state.logComments = {};
   state.calendarMetadata = { years: {}, loading: {}, errors: {} };
@@ -640,8 +640,8 @@ function calendarPage() {
   return `<section class="ios-calendar ios-calendar--${state.calendarMode} ${zoomClass}">${top}${modes}${metadataNote ? `<p class="calendar-metadata-note" role="status">${metadataNote}</p>` : ''}${isMonth?`<div class="calendar-month-content" id="calendar-scroll-area">${dateStrip}${calendarSelectedAgenda(tasks,todos)}</div>`:weekNavigation+dateStrip+`<div class="calendar-agenda-scroll">${calendarAgenda(tasks,logs,todos)}</div>`}</section>`;
 }
 
-async function loadDirectory(force = false) {
-  if (state.directoryLoading || (state.directoryLoaded && !force)) return;
+async function loadDirectory() {
+  if (state.directoryLoading) return;
   const token = state.token;
   state.directoryLoading = true; state.directoryError = '';
   try {
@@ -649,7 +649,6 @@ async function loadDirectory(force = false) {
     if (state.token !== token) return;
     if (!Array.isArray(contacts)) throw new Error('通讯录数据无效');
     state.directoryContacts = Object.fromEntries(contacts.map(contact => [contact.id,contact]));
-    state.directoryLoaded = true;
   } catch (error) { if (state.token === token) state.directoryError = error.message; }
   finally {
     if (state.token === token) {
@@ -660,7 +659,10 @@ async function loadDirectory(force = false) {
 }
 
 function directoryPage() {
-  const members = USERS.filter(u => u.enabled !== false).map(u => ({...u,...state.directoryContacts[u.id]}));
+  const members = USERS.filter(u => u.enabled !== false).map(u => {
+    const contact = state.directoryContacts[u.id];
+    return contact ? {...u, phone:contact.phone, avatarData:contact.avatarData} : u;
+  });
   const member = members.find(u => u.id === state.directoryMember);
   const top = `<section class="task-page-head"><div class="task-page-title"><span class="eyebrow">公司 · ${members.length} 位成员</span><h1>企业通讯录</h1></div></section><div class="task-view-row">${viewSwitch('directory')}</div>${state.directoryLoading ? '<p class="panel-note" role="status">正在加载联系人…</p>' : state.directoryError ? `<p role="alert">联系人加载失败 ${button('重试','directory-reload','','text-button')}</p>` : ''}`;
   if (!member) {
@@ -695,7 +697,7 @@ function directoryMonth(tasks) {
 }
 
 async function directoryAction(name,id) {
-  if (name === 'directory-reload') return loadDirectory(true);
+  if (name === 'directory-reload') return loadDirectory();
   if (name === 'directory-member') { state.directoryMember=id; state.directoryTaskFilters={query:'',priority:'',filter:'all'}; state.directoryTab='tasks'; state.directoryDate=dateKey(); }
   if (name === 'directory-back') state.directoryMember='';
   if (name === 'directory-tab') state.directoryTab=id;
@@ -715,8 +717,10 @@ function highlightsDetail(kind = 'company', id = '') {
 }
 
 const kindLabel = k => ({ create: '创建', edit: '编辑', delete: '删除' }[k]);
+const requestStatus = {pending:'待审核',approved:'已通过',rejected:'已驳回',withdrawn:'已撤回'};
+
 function requestCard(r) {
-  return `<article class="log-card"><div class="log-card-top"><b>${kindLabel(r.kind)}申请</b><span>${({pending:'待审核',approved:'已通过',rejected:'已驳回'})[r.status]}</span></div><h3>${esc(r.after?.title || r.before?.title)}</h3><p>申请人 · ${esc(userById(r.proposer)?.name)}<br>${stamp(r.createdAt)}</p>${r.reason ? `<p>审核备注：${esc(r.reason)}</p>` : ''}${r.reviewers?.length ? `<p class="reviewer-progress">审核通过 ${(r.reviews || []).filter(v => v.approve).length} / ${r.reviewers.length} 人</p>` : ''}${button('查看申请', 'request', r.id, 'soft-button')}</article>`;
+  return `<article class="log-card"><div class="log-card-top"><b>${kindLabel(r.kind)}申请</b><span>${requestStatus[r.status]}</span></div><h3>${esc(r.after?.title || r.before?.title)}</h3><p>申请人 · ${esc(userById(r.proposer)?.name)}<br>${stamp(r.createdAt)}</p>${r.reason ? `<p>备注：${esc(r.reason)}</p>` : ''}${r.reviewers?.length ? `<p class="reviewer-progress">审核通过 ${(r.reviews || []).filter(v => v.approve).length} / ${r.reviewers.length} 人</p>` : ''}${button('查看申请', 'request', r.id, 'soft-button')}</article>`;
 }
 
 function settingsRow(icon, title, detail, action) {
@@ -996,12 +1000,19 @@ async function logDetail(id) {
   modal.dataset.log = id;
 }
 
+function reviewerUnavailable(id) {
+  const member = userById(id);
+  return !member || member.enabled === false || !member.department || member.department === '待分配';
+}
+
 function reviewProgress(request) {
   if (!request.reviewers?.length) return '';
   const records = request.reviews || [];
   return `<section class="review-progress"><h3>审核进度 · ${records.filter(v => v.approve).length} / ${request.reviewers.length} 人通过</h3><p class="panel-note">所有选定审核人通过后生效，任意一人驳回即结束申请。</p><ul>${request.reviewers.map(id => {
     const record = records.find(v => v.reviewer === id);
-    return `<li><div><b>${esc(userById(id)?.name || id)}</b><span>${record ? record.approve ? '已通过' : '已驳回' : request.status === 'rejected' ? '已结束' : '待审核'}</span></div>${record ? `<small>${stamp(record.at)}</small>${record.reason ? `<p class="log-content">${esc(record.reason)}</p>` : ''}` : ''}</li>`;
+    const status = record ? (record.approve ? '已通过' : '已驳回')
+      : request.status !== 'pending' ? '已结束' : reviewerUnavailable(id) ? '账号不可用' : '待审核';
+    return `<li><div><b>${esc(userById(id)?.name || id)}</b><span>${status}</span></div>${record ? `<small>${stamp(record.at)}</small>${record.reason ? `<p class="log-content">${esc(record.reason)}</p>` : ''}` : ''}</li>`;
   }).join('')}</ul></section>`;
 }
 
@@ -1010,7 +1021,23 @@ function requestDetail(id) {
   if (!r) return notify('无权查看申请',true);
   const fromMessages = Boolean(modal.dataset.messages);
   const view = v => v ? `<h3>${esc(v.title)}</h3><p>负责人 · ${esc(names(v.owners))}<br>开始 · ${dueText(taskStartAt(v))}<br>结束 · ${dueText(v.dueAt)}<br>${PRIORITY[v.priority]}</p><p class="log-content">${esc(v.detail)}</p>` : '<p>无</p>';
-  open(`${kindLabel(r.kind)}任务申请`, `<div class="request-content">${r.before ? '<h4>原内容</h4>'+view(r.before) : ''}<h4>${r.kind === 'delete' ? '变更结果' : '申请内容'}</h4>${r.kind === 'delete' ? '<p>审核通过后归档删除，历史记录仍保留。</p>' : view(r.after)}<p class="panel-note">申请人：${esc(userById(r.proposer)?.name)} · ${stamp(r.createdAt)}</p>${r.reason ? `<p>审核备注：${esc(r.reason)}</p>` : ''}</div>${reviewProgress(r)}${r.status !== 'pending' ? `<p class="detail-copy">审核结果：${r.status === 'approved' ? '已通过' : '已驳回'}<br>审核人：${esc(userById(r.reviewer)?.name || '审核人')} · ${stamp(r.reviewedAt || r.createdAt)}</p>` : canReviewRequest(user(),r) ? `<form class="modal-form" data-form="review" data-id="${esc(id)}"><label>审核备注（驳回必填）<textarea name="reason" maxlength="500" rows="3"></textarea></label><div class="modal-actions"><button class="ghost-button" name="decision" value="reject" type="submit">驳回</button><button class="primary-button" name="decision" value="approve" type="submit">审核通过</button></div></form>` : `<p class="detail-copy">${r.proposer === user().id ? '申请人不能自审，等待审核人处理。' : (r.reviews || []).some(v => v.reviewer === user().id) ? '你已提交审核意见，等待其他审核人处理。' : '你未被指定为本次申请的审核人。'}</p>`}`);
+  const ownRequest = r.proposer === user().id;
+  const reviews = r.reviews || [];
+  const canWithdraw = r.status === 'pending' && (ownRequest || (isGlobal(user()) &&
+    r.reviewers?.some(id => reviewerUnavailable(id) && !reviews.some(record => record.reviewer === id))));
+  let resolution;
+  if (r.status !== 'pending') {
+    const actorLabel = r.status === 'withdrawn' ? '撤回人' : '审核人';
+    resolution = `<p class="detail-copy">${r.status === 'withdrawn' ? '申请结果' : '审核结果'}：${requestStatus[r.status]}<br>${actorLabel}：${esc(userById(r.reviewer)?.name || actorLabel)} · ${stamp(r.reviewedAt || r.createdAt)}</p>`;
+  } else if (canReviewRequest(user(),r)) {
+    resolution = `<form class="modal-form" data-form="review" data-id="${esc(id)}"><label>审核备注（驳回必填）<textarea name="reason" maxlength="500" rows="3"></textarea></label><div class="modal-actions"><button class="ghost-button" name="decision" value="reject" type="submit">驳回</button><button class="primary-button" name="decision" value="approve" type="submit">审核通过</button></div></form>`;
+  } else {
+    const message = ownRequest ? '申请人不能自审，等待审核人处理。'
+      : reviews.some(v => v.reviewer === user().id) ? '你已提交审核意见，等待其他审核人处理。' : '你未被指定为本次申请的审核人。';
+    resolution = `<p class="detail-copy">${message}</p>`;
+  }
+  const withdraw = canWithdraw ? `<form data-form="withdraw-request" data-id="${esc(id)}"><div class="modal-actions"><button class="ghost-button" type="submit">撤回申请</button></div></form>` : '';
+  open(`${kindLabel(r.kind)}任务申请`, `<div class="request-content">${r.before ? '<h4>原内容</h4>'+view(r.before) : ''}<h4>${r.kind === 'delete' ? '变更结果' : '申请内容'}</h4>${r.kind === 'delete' ? '<p>审核通过后归档删除，历史记录仍保留。</p>' : view(r.after)}<p class="panel-note">申请人：${esc(userById(r.proposer)?.name)} · ${stamp(r.createdAt)}</p>${r.reason ? `<p>备注：${esc(r.reason)}</p>` : ''}</div>${reviewProgress(r)}${resolution}${withdraw}`);
   if (fromMessages) {
     modal.dataset.messages = 'request';
     modal.querySelector('.request-content').insertAdjacentHTML('beforebegin', button('‹ 返回消息', 'messages-return', '', 'text-button messages-back'));
@@ -1229,7 +1256,9 @@ document.addEventListener('click', async e => {
   if (el.hasAttribute('data-close')) return close();
   if (el.dataset.route) {
     state.route = el.dataset.route;
-    render(); window.scrollTo(0,0); return;
+    render(); window.scrollTo(0,0);
+    if (state.route === 'calendar' && state.taskView === 'directory') void loadDirectory();
+    return;
   }
   if (el.dataset.filter) { setTaskFilters({filter:el.dataset.filter}); render(); return; }
   if (el.dataset.mode) { state.calendarMode=el.dataset.mode; close(); render(); return; }
@@ -1421,6 +1450,9 @@ document.addEventListener('submit', async e => {
     return;
   }
   if (form.dataset.form === 'review') return submitOnce(form, () => save(async () => { await api(`/tasks/requests/${id}/review`, { method: 'POST', body: JSON.stringify({ approve: e.submitter.value === 'approve', reason: v.reason }) }); },'审核意见已保存，请在申请中查看最新进度'));
+  if (form.dataset.form === 'withdraw-request') {
+    return submitOnce(form, () => save(() => api(`/tasks/requests/${encodeURIComponent(id)}/withdraw`, {method:'POST'}), '申请已撤回'));
+  }
 });
 
 modal.addEventListener('cancel', e => {
@@ -1439,6 +1471,7 @@ async function refreshWorkspace() {
   const tagsBefore = JSON.stringify(state.db.tags);
   try {
     await loadWorkspace();
+    if (state.route === 'calendar' && state.taskView === 'directory') void loadDirectory();
     // Keep form drafts and the reader's place while receiving updates.
     refreshView();
     if (modal.dataset.messages === 'list') { render(); openMessages(); }

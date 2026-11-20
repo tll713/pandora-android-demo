@@ -81,12 +81,15 @@ public class TaskService {
     }
 
     public List<User> getAllowedAssignees(User user) {
-        if (user.isGlobal()) return userRepository.findAll().stream()
-                .filter(u -> u.isEnabled() && u.getRole() != User.Role.ADMIN).collect(Collectors.toList());
         if (user.isManager()) return userRepository.findAll().stream()
-                .filter(u -> u.isEnabled() && u.getDepartment().equals(user.getDepartment()) && u.getRole() != User.Role.ADMIN)
-                .collect(Collectors.toList());
+                .filter(u -> u.isOrganizationMember() && canAssignTaskTo(user, u)).toList();
         return List.of(user);
+    }
+
+    private boolean canAssignTaskTo(User proposer, User owner) {
+        if (!proposer.isManager()) return proposer.getId().equals(owner.getId());
+        return owner.getRole() != User.Role.ADMIN
+                && (proposer.isGlobal() || proposer.getDepartment().equals(owner.getDepartment()));
     }
 
     // ============ 任务变更申请 ============
@@ -97,7 +100,7 @@ public class TaskService {
     }
 
     public List<User> getAllowedReviewers(User proposer) {
-        return userRepository.findAll().stream().filter(User::isEnabled)
+        return userRepository.findAll().stream().filter(User::isOrganizationMember)
                 .filter(u -> !u.getId().equals(proposer.getId())).toList();
     }
 
@@ -228,11 +231,34 @@ public class TaskService {
     }
 
     public boolean canReviewRequest(User user, ChangeRequest req) {
-        return user.isEnabled() && req != null
+        return user.isOrganizationMember() && req != null
                 && !req.getProposerId().equals(user.getId()) 
                 && req.getStatus() == ChangeRequest.Status.PENDING
                 && (reviewers(req).isEmpty() ? user.isGlobal() : reviewers(req).contains(user.getId()))
                 && reviews(req).stream().noneMatch(r -> user.getId().equals(r.get("reviewer")));
+    }
+
+    @Transactional
+    public ChangeRequest withdrawTaskChange(User actor, String requestId) {
+        ChangeRequest req = changeRequestRepository.findForUpdate(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("申请不存在"));
+        if (req.getStatus() != ChangeRequest.Status.PENDING)
+            throw new IllegalArgumentException("只能撤回待审核申请");
+        boolean ownRequest = req.getProposerId().equals(actor.getId());
+        if (!actor.isOrganizationMember() || (!ownRequest && !(actor.isGlobal() && hasUnavailableReviewer(req))))
+            throw new IllegalArgumentException("只能撤回本人的申请，或由管理员、创始人撤回有审核人不可用的申请");
+
+        req.setStatus(ChangeRequest.Status.WITHDRAWN);
+        req.setReviewerId(actor.getId());
+        req.setReviewedAt(LocalDateTime.now());
+        req.setReason(ownRequest ? "申请人主动撤回" : "有尚未提交意见的审核人已不可用");
+        return changeRequestRepository.save(req);
+    }
+
+    private boolean hasUnavailableReviewer(ChangeRequest req) {
+        Set<String> remaining = new HashSet<>(reviewers(req));
+        reviews(req).forEach(record -> remaining.remove(record.get("reviewer")));
+        return userRepository.findAllById(remaining).stream().filter(User::isOrganizationMember).count() < remaining.size();
     }
 
     @Transactional
@@ -253,10 +279,14 @@ public class TaskService {
                 .map(r -> (String) r.get("reviewer")).collect(Collectors.toSet());
         if (approve && !approved.containsAll(reviewers(req))) return changeRequestRepository.save(req);
         if (approve) {
+            Map<String, Object> after = req.getKind() == ChangeRequest.Kind.DELETE ? null : fromJson(req.getAfterJson());
+            // Tag deletion takes the same tag-before-task lock order.
+            if (after != null && after.get("tagId") instanceof String tagId && tagRepository.findForUpdate(tagId).isEmpty()) {
+                after.put("tagId", null);
+            }
             if (req.getKind() == ChangeRequest.Kind.CREATE) {
                 if (taskRepository.existsById(req.getTaskId())) throw new IllegalArgumentException("任务已存在，请勿重复审核");
-                Map<String, Object> after = fromJson(req.getAfterJson());
-                validateApprovedOwners(after);
+                validateApprovedOwners(req, after);
                 Task task = new Task();
                 task.setId(req.getTaskId());
                 task.setTitle((String) after.get("title"));
@@ -286,8 +316,7 @@ public class TaskService {
                 Set<String> recipients = taskAudience(task);
                 String previousTitle = task.getTitle();
                 if (req.getKind() == ChangeRequest.Kind.EDIT) {
-                    Map<String, Object> after = fromJson(req.getAfterJson());
-                    validateApprovedOwners(after);
+                    validateApprovedOwners(req, after);
                     task.setTitle((String) after.get("title"));
                     task.setDetail((String) after.get("detail"));
                     task.setPriority(Task.Priority.valueOf(((String) after.get("priority")).toUpperCase()));
@@ -390,14 +419,25 @@ public class TaskService {
 
     // ============ 辅助 ============
 
-    private void validateApprovedOwners(Map<String, Object> after) {
+    private void validateApprovedOwners(ChangeRequest req, Map<String, Object> after) {
         List<String> owners = (List<String>) after.get("owners");
         if (owners == null || owners.isEmpty()) throw new IllegalArgumentException("任务缺少负责人，请驳回后重新申请");
-        // Stable lock order prevents disable/account edits racing the approval check.
-        for (String id : owners.stream().distinct().sorted().toList()) {
-            User owner = userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("负责人不存在，请驳回后重新申请"));
-            entityManager.refresh(owner, LockModeType.PESSIMISTIC_WRITE);
-            if (!owner.isOrganizationMember()) throw new IllegalArgumentException("负责人已停用或组织归属已变更，请驳回后重新申请或更换负责人");
+        // Lock current account data in ID order so account edits cannot race approval.
+        Map<String, User> accounts = new HashMap<>();
+        Set<String> accountIds = new TreeSet<>(owners);
+        accountIds.add(req.getProposerId());
+        for (String id : accountIds) {
+            User account = userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("申请人或负责人不存在，请驳回后重新申请"));
+            entityManager.refresh(account, LockModeType.PESSIMISTIC_WRITE);
+            accounts.put(id, account);
+        }
+        User proposer = accounts.get(req.getProposerId());
+        if (!proposer.isOrganizationMember() || (req.getKind() == ChangeRequest.Kind.EDIT && !proposer.isManager()))
+            throw new IllegalArgumentException("申请人已停用或权限已变更，请驳回后重新申请");
+        for (String id : owners) {
+            User owner = accounts.get(id);
+            if (!owner.isOrganizationMember() || !canAssignTaskTo(proposer, owner))
+                throw new IllegalArgumentException("负责人已停用或不在申请人的分派范围内，请驳回后重新申请");
         }
     }
 

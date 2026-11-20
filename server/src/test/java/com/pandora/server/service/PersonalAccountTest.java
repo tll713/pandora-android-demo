@@ -7,7 +7,10 @@ import com.pandora.server.repository.WorkLogRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -87,8 +90,9 @@ class PersonalAccountTest {
     @Test
     void logDiscoveryQueriesRespectOrganizationAndRole() {
         WorkLogRepository logs = mock(WorkLogRepository.class);
-        LogService service = new LogService(logs, mock(TaskService.class), users);
-        LocalDate today = LocalDate.now();
+        Clock clock = Clock.system(ZoneId.of("Asia/Shanghai"));
+        LogService service = new LogService(logs, mock(TaskService.class), users, clock);
+        LocalDate today = LocalDate.now(clock);
         User user = user();
         User colleague = new User(); colleague.setId("colleague"); colleague.setRole(User.Role.EMPLOYEE); colleague.setDepartment(user.getDepartment());
         User lead = new User(); lead.setId("lead"); lead.setRole(User.Role.TEAM_LEAD); lead.setDepartment(user.getDepartment());
@@ -117,5 +121,26 @@ class PersonalAccountTest {
             assertEquals(expected.contains(all.get(3)),service.canViewLog(user,outsider.getId()));
             assertEquals(expected.contains(all.get(2)),service.canViewLog(user,lead.getId()));
         }
+    }
+
+    @Test
+    void logSubmissionAndWorkspaceUseBeijingDateAfterMidnight() {
+        Clock clock = Clock.fixed(Instant.parse("2026-11-19T16:15:00Z"), ZoneId.of("Asia/Shanghai"));
+        WorkLogRepository logs = mock(WorkLogRepository.class);
+        LogService service = new LogService(logs, mock(TaskService.class), users, clock);
+        User author = user();
+        author.setRole(User.Role.EMPLOYEE);
+        LocalDate today = LocalDate.of(2026, 11, 20);
+        when(users.findForUpdate(author.getId())).thenReturn(Optional.of(author));
+        when(logs.save(any(WorkLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        WorkLog submitted = service.saveLog(author, java.util.Map.of("date", today.toString(), "content", "今日工作"), null);
+        assertEquals(today, submitted.getDate());
+        assertThrows(IllegalArgumentException.class, () ->
+                service.saveLog(author, java.util.Map.of("date", today.plusDays(1).toString(), "content", "未来工作"), null));
+        assertThrows(IllegalArgumentException.class, () ->
+                service.saveLog(author, java.util.Map.of("date", today.minusDays(3).toString(), "content", "旧日志"), null));
+        service.getWorkspaceLogs(author);
+        verify(logs).findByAuthorIdAndDateBetween(author.getId(), today.withDayOfMonth(1), today);
     }
 }

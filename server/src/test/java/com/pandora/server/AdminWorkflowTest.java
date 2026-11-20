@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -287,6 +288,29 @@ class AdminWorkflowTest {
         values.put("tagId", "tag-does-not-exist");
         mvc.perform(post("/api/tasks/requests").header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("kind", "create", "values", values)))).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void deletingTagBeforeApprovalDoesNotRestoreItOnCreateOrEdit() throws Exception {
+        JsonNode tag = call("POST", "/api/admin/tags", admin, Map.of("name", "待删除标签", "color", "#a7bfb4"));
+        String tagId = tag.path("id").asText();
+        var values = Map.of("title", "标签删除测试", "owners", List.of("employee"), "dueAt", "2027-01-10T18:00",
+                "priority", "medium", "tagId", tagId);
+        JsonNode original = call("POST", "/api/tasks/requests", admin, Map.of("kind", "create", "values", values));
+        call("POST", "/api/tasks/requests/" + original.path("id").asText() + "/review", founder, Map.of("approve", true));
+        String taskId = original.path("taskId").asText();
+
+        JsonNode creation = call("POST", "/api/tasks/requests", admin, Map.of("kind", "create", "values", values));
+        JsonNode edit = call("POST", "/api/tasks/requests", admin, Map.of("kind", "edit", "taskId", taskId, "values", values));
+        mvc.perform(delete("/api/admin/tags/" + tagId).header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.cleared").value(1));
+        assertFalse(tags.existsById(tagId));
+
+        for (JsonNode request : List.of(creation, edit)) {
+            JsonNode approved = call("POST", "/api/tasks/requests/" + request.path("id").asText() + "/review", founder, Map.of("approve", true));
+            assertEquals("approved", approved.path("status").asText());
+            assertNull(jdbc.queryForObject("SELECT tag_id FROM tasks WHERE id=?", String.class, request.path("taskId").asText()));
+        }
     }
 
     @Test

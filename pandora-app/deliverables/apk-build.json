@@ -1,13 +1,13 @@
 {
-  "apk": "pandora-demo-0.5.22.apk",
-  "version": "0.5.22",
-  "versionCode": 56,
-  "sha256": "cbf2c45b8efa5d2394f747056e3a29009dac12ef187a08e5276c3967d90df28c",
+  "apk": "pandora-demo-0.5.23.apk",
+  "version": "0.5.23",
+  "versionCode": 57,
+  "sha256": "e5c5c46909c321d04ca242c99a9bdbc0ecb9f721432737a73ed107c321712978",
   "bytes": 95173,
   "minimumAndroid": "8.0 (API 26)",
   "targetSdk": 35,
   "embeddedAssetsMatchSource": true,
-  "apiBase": "http://10.17.147.160:8080/api",
+  "apiBase": "http://10.117.145.160:8080/api",
   "allowsHttp": true,
   "buildKind": "demo"
 }

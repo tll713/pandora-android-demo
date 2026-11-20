@@ -16,7 +16,7 @@ const members = [
   {id:'disabled',name:'停用成员',department:'产品设计部',role:'EMPLOYEE',roleName:'员工',enabled:false}
 ];
 const comments = [];
-let current = members[0], failDirectory = false, failHistory = false;
+let current = members[0], failDirectory = false, failHistory = false, directoryContacts;
 const tasks = Array.from({length:6},(_,i) => ({id:`task${i}`,title:`客户交付 ${i+1}`,detail:'核对交付记录与验收安排',owners:['lin'],creator:'manager',startAt:'2026-11-12T09:00',dueAt:'2026-11-15T18:00',priority:'medium',status:'doing',tagId:'design',createdAt:'2026-11-10T08:00',history:[]}));
 tasks.push({...tasks[0],id:'own-task',title:'本人交付任务',owners:['admin','lin'],creator:'admin'});
 tasks.push({...tasks[0],id:'private-task',title:'市场内部任务',owners:['chen'],creator:'chen'});
@@ -33,7 +33,7 @@ await page.route('**/api/**',async route => {
   if (url.pathname === '/api/calendar/metadata') return respond({year:Number(url.searchParams.get('year')),published:false,holidays:{},solarTerms:{}});
   if (url.pathname === '/api/auth/login') return respond({token:`directory-${current.id}`,user:current});
   if (url.pathname === '/api/workspace') return respond({user:current,db});
-  if (url.pathname === '/api/directory') return failDirectory ? respond({error:'联系人暂不可用'},500) : respond(members.filter(u => u.enabled !== false));
+  if (url.pathname === '/api/directory') return failDirectory ? respond({error:'联系人暂不可用'},500) : respond(directoryContacts ?? members.filter(u => u.enabled !== false));
   if (url.pathname === '/api/tags') return respond(db.tags);
   if (url.pathname === '/api/logs/history') return failHistory ? respond({error:'历史日志暂不可用'},500) : respond([{id:'old-log',author:'lin',date:'2026-09-03',title:'九月工作记录',content:'历史交付记录',versions:[]}]);
   if (url.pathname.endsWith('/comments')) {
@@ -380,6 +380,18 @@ try {
   assert.match(await page.locator('.directory-page').innerText(),/日志不在你的查看范围/);
   assert.doesNotMatch(await page.locator('.directory-page').innerText(),/市场内部任务|市场内部日报/);
   checks.push('320/390/768/1280无页面横向溢出；员工可查联系人，不能访问其他成员的受限任务和日志');
+
+  directoryContacts = members.filter(u => u.enabled !== false).map(u => ({...u}));
+  const updated = members.find(u => u.id === 'chen');
+  const contact = directoryContacts.find(u => u.id === updated.id);
+  updated.name = '陈嘉宁（新）';
+  updated.department = '客户服务部';
+  contact.phone = '13800138200';
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForFunction(() => document.querySelector('.directory-profile')?.textContent.includes('13800138200'));
+  assert.match(await page.locator('.directory-profile').innerText(), /陈嘉宁（新）/);
+  assert.match(await page.locator('.directory-profile').innerText(), /客户服务部/);
+  checks.push('在线同步刷新通讯录手机号，旧联系人响应不会覆盖工作区最新姓名和部门');
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({passed:true,checks},null,2));
 } finally { await browser.close(); }

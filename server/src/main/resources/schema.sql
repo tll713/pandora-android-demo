@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS change_requests (
   kind ENUM('CREATE','EDIT','DELETE') NOT NULL,
   task_id VARCHAR(60) NOT NULL,
   proposer_id VARCHAR(30) NOT NULL,
-  status ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING',
+  status ENUM('PENDING','APPROVED','REJECTED','WITHDRAWN') NOT NULL DEFAULT 'PENDING',
   after_json LONGTEXT,
   before_json LONGTEXT,
   expected_revision INT,
@@ -130,6 +130,13 @@ CREATE TABLE IF NOT EXISTS highlights (
 );
 
 -- Upgrade existing installations without dropping business data.
+
+SET @pandora_ddl = IF(
+  (SELECT LOCATE('WITHDRAWN', UPPER(column_type)) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'change_requests' AND column_name = 'status') = 0,
+  'ALTER TABLE change_requests MODIFY COLUMN status ENUM(''PENDING'',''APPROVED'',''REJECTED'',''WITHDRAWN'') NOT NULL DEFAULT ''PENDING''', 'SELECT 1');
+PREPARE pandora_migration FROM @pandora_ddl;
+EXECUTE pandora_migration;
+DEALLOCATE PREPARE pandora_migration;
 
 SET @pandora_ddl = IF(
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'change_requests' AND column_name = 'reviewers_json') = 0,
