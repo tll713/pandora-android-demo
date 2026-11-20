@@ -18,9 +18,10 @@ try {
   for (const broken of [true,false]) {
     const context = await browser.newContext({viewport:{width:390,height:844},locale:'zh-CN',timezoneId:'Asia/Shanghai'});
     const page = await context.newPage();
-    const violations = [];
-    await page.exposeFunction('recordViolation', directive => violations.push(directive));
-    await page.addInitScript(() => document.addEventListener('securitypolicyviolation', e => window.recordViolation(e.effectiveDirective)));
+    await page.addInitScript(() => {
+      window.cspViolations = [];
+      document.addEventListener('securitypolicyviolation', e => window.cspViolations.push(e.effectiveDirective));
+    });
     await serveAndroid(context, api, broken);
     await page.goto('https://appassets.androidplatform.net/index.html');
     await page.locator('[name=identifier]').fill(process.env.PANDORA_TEST_IDENTIFIER);
@@ -28,10 +29,10 @@ try {
     await page.getByRole('button',{name:'登录',exact:true}).click();
     if(broken) {
       await page.locator('#toast').filter({hasText:'暂时无法连接服务'}).waitFor();
-      assert.ok(violations.includes('connect-src'), 'Old address must reproduce the CSP failure');
+      await page.waitForFunction(() => window.cspViolations.includes('connect-src'));
     } else {
       await page.locator('.dashboard-page').waitFor();
-      assert.deepEqual(violations,[]);
+      assert.deepEqual(await page.evaluate(() => window.cspViolations),[]);
       await page.locator('[data-route=calendar]').click();
       await page.locator('.ios-calendar--month').waitFor();
       await page.locator('.calendar-day.is-today .day-date').click();

@@ -29,7 +29,9 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private static final int AVATAR_REQUEST = 101;
     private static final String ORIGIN = "appassets.androidplatform.net";
-    private static final Set<String> FILES = new HashSet<>(Arrays.asList("index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/style.css", "src/mobile.css"));
+    private static final Set<String> FILES = new HashSet<>(Arrays.asList(
+        "index.html", "favicon.svg", "src/app.js", "src/domain.js", "src/date-picker.js", "src/style.css", "src/mobile.css"
+    ));
     // Generated from the build configuration; release builds require HTTPS.
     private static final String API_BASE = BuildConfig.API_BASE;
 
@@ -55,7 +57,7 @@ public final class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(BuildConfig.ALLOW_HTTP ? WebSettings.MIXED_CONTENT_ALWAYS_ALLOW : WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.5.23");
+        settings.setUserAgentString(settings.getUserAgentString() + " PandoraAndroid/0.5.24");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);

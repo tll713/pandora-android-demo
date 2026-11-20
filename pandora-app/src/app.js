@@ -18,7 +18,7 @@ const state = { token: localStorage.getItem('pandora.token'), user: null, route:
   logFrom: '', logTo: '', messageFilter: 'all',
   taskQuery: '', taskPriority: '', logHistoryLoaded: false, logLoading: false, logError: '', taskView: 'calendar', logArchive: false, db: null,
   calendarMetadata: { years: readCalendarCache(), loading: {}, errors: {} } };
-const APP_VERSION = '0.5.23';
+const APP_VERSION = '0.5.24';
 let observedToday = dateKey(), midnightTimer, deferredRender = false, deferredTodoDate = '', workspaceLoad = 0;
 let todoDateVersion = 0;
 

@@ -28,7 +28,7 @@ const users = [
   { id: 'admin', name: '系统管理员', role: 'ADMIN', department: '管理中心', enabled: true },
   { id: 'founder', name: '许文清', role: 'FOUNDER', department: '管理中心', enabled: true },
   { id: 'lin', name: '林予安', role: 'EMPLOYEE', department: '产品设计部', enabled: true },
-  { id: 'zhou', name: '周一鸣', role: 'TEAM_LEAD', department: '产品设计部', enabled: true },
+  { id: 'zhou', name: '周一鸣', phone: '13800138002', gender: '其他', role: 'TEAM_LEAD', department: '产品设计部', enabled: true },
   { id: 'chen', name: '陈嘉宁', role: 'EMPLOYEE', department: '市场运营部', enabled: false }
 ];
 const highlights = [];
@@ -128,6 +128,8 @@ try {
   assert.equal(await page.locator('tbody tr').count(), 2);
   await page.locator('#filter-form [name=department]').selectOption('');
   await page.getByRole('button', { name: '添加成员', exact: true }).click();
+  const gender = page.locator('#user-form [name=gender]');
+  assert.deepEqual(await gender.locator('option').allTextContents(), ['未填写','男','女']);
   await page.locator('#user-form [name=name]').fill('测试成员');
   assert.equal(await page.locator('#user-form [name=login]').count(), 0);
   await page.locator('#user-form [name=phone]').fill('13800138001');
@@ -143,10 +145,26 @@ try {
   await page.locator('#temporary-password').waitFor({ state: 'detached' });
   assert.equal(await page.locator('#temporary-password').count(),0);
   await page.locator('[data-action=edit-user][data-id=test-member]').click();
+  assert.deepEqual(await gender.locator('option').allTextContents(), ['未填写','男','女']);
+  assert.equal(await gender.inputValue(), '女');
   await page.locator('#user-form [name=enabled]').uncheck();
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await page.locator('#detail-dialog').waitFor({ state: 'hidden' }); await waitReload();
   assert.equal(users.at(-1).enabled, false);
+
+  const legacyMember = users.find(user => user.id === 'zhou');
+  await page.locator('[data-action=edit-user][data-id=zhou]').click();
+  assert.deepEqual(await gender.locator('option').allTextContents(), ['保留原值','男','女']);
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await page.locator('#detail-dialog').waitFor({ state: 'hidden' }); await waitReload();
+  assert.equal(legacyMember.gender, '其他');
+  await page.locator('[data-action=edit-user][data-id=zhou]').click();
+  await gender.selectOption('男');
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await page.locator('#detail-dialog').waitFor({ state: 'hidden' }); await waitReload();
+  assert.equal(legacyMember.gender, '男');
+  checks.push('性别只提供男、女，已有其他值可保留或改选');
+
   await page.locator('[data-action=reset-password][data-id=lin]').click();
   await page.locator('#password-form [name=password]').fill('new-password-123');
   await page.locator('#password-form [name=confirmPassword]').fill('wrong-password');
